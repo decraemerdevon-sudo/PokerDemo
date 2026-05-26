@@ -21,6 +21,7 @@ type Seat = {
 };
 type TimelineEvent = { street: string; actor: string; action: string; amount?: number; note: string };
 type BotDecision = { action: string; amount: number; status: string; note: string };
+type BotContext = { street: Street; visibleBoard: Card[]; pot: number; highBet: number };
 
 const suitLabels: Record<Suit, string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 const suitSymbols: Record<Suit, string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
@@ -127,6 +128,7 @@ function App() {
   const [coachAdvice, setCoachAdvice] = useState('');
   const [lastAction, setLastAction] = useState('No action selected yet.');
   const [pendingBots, setPendingBots] = useState<string[]>([]);
+  const [botContext, setBotContext] = useState<BotContext | null>(null);
 
   const visibleBoard = useMemo(() => board.slice(0, boardCount(street)), [street]);
   const pot = useMemo(() => seats.reduce((sum, seat) => sum + seat.contribution, 0), [seats]);
@@ -135,23 +137,31 @@ function App() {
   const activeEvent = timeline[selectedEvent];
 
   useEffect(() => {
-    if (!activeBot || mode !== 'turn') return;
+    if (!activeBot || !botContext || mode !== 'turn') return;
     const timer = window.setTimeout(() => {
-      const decision = getBotDecision(activeBot, street, pot, highBet, visibleBoard);
+      const decision = getBotDecision(activeBot, botContext.street, botContext.pot, botContext.highBet, botContext.visibleBoard);
       setSeats((current) => current.map((seat) => seat.id === activeBot.id ? { ...seat, contribution: decision.action === 'Fold' ? seat.contribution : seat.contribution + decision.amount, stack: decision.action === 'Fold' ? seat.stack : Math.max(0, seat.stack - decision.amount), folded: decision.action === 'Fold' || seat.folded, status: decision.status } : seat));
-      setTimeline((current) => [...current, { street, actor: activeBot.name, action: decision.action, amount: decision.amount || undefined, note: decision.note }]);
+      setTimeline((current) => [...current, { street: botContext.street, actor: activeBot.name, action: decision.action, amount: decision.amount || undefined, note: decision.note }]);
       setLastAction(`${activeBot.name} ${decision.action.toLowerCase()}${decision.amount ? `s ${formatMoney(decision.amount)}` : 's'}.`);
-      setPendingBots((current) => current.slice(1));
+      setPendingBots((current) => {
+        const nextQueue = current.slice(1);
+        if (nextQueue.length === 0) setBotContext(null);
+        return nextQueue;
+      });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [activeBot, highBet, mode, pot, street, visibleBoard]);
+  }, [activeBot, botContext, mode]);
 
   const runAction = (action: string) => {
     const amount = action.includes('$') ? Number(action.split('$')[1]) : 0;
-    setSeats((current) => current.map((seat) => seat.isHero ? { ...seat, contribution: action === 'Fold' ? seat.contribution : seat.contribution + amount, stack: action === 'Fold' ? seat.stack : Math.max(0, seat.stack - amount), folded: action === 'Fold', status: action === 'Fold' ? 'Folded' : 'Line chosen' } : seat));
+    const nextSeats = seats.map((seat) => seat.isHero ? { ...seat, contribution: action === 'Fold' ? seat.contribution : seat.contribution + amount, stack: action === 'Fold' ? seat.stack : Math.max(0, seat.stack - amount), folded: action === 'Fold', status: action === 'Fold' ? 'Folded' : 'Line chosen' } : seat);
+    const nextPot = nextSeats.reduce((sum, seat) => sum + seat.contribution, 0);
+    const nextHighBet = Math.max(...nextSeats.map((seat) => seat.contribution));
+    setSeats(nextSeats);
     setTimeline((current) => [...current, { street, actor: 'You', action: action.split(' ')[0], amount: amount || undefined, note: `Hero chooses ${action.toLowerCase()} after weighing ${texture(visibleBoard)} and prior action.` }]);
     setLastAction(`Selected ${action}. Bots are resolving the rest of the street.`);
-    setPendingBots(botOrder.filter((id) => seats.some((seat) => seat.id === id && !seat.folded)));
+    setBotContext({ street, visibleBoard, pot: nextPot, highBet: nextHighBet });
+    setPendingBots(botOrder.filter((id) => nextSeats.some((seat) => seat.id === id && !seat.folded)));
   };
   const askCoach = () => {
     setCoachState('loading');
@@ -162,7 +172,7 @@ function App() {
     }, 450);
   };
   const reset = () => {
-    setMode('turn'); setStreet('Flop'); setSeats(initialSeats); setTimeline(initialTimeline); setSelectedEvent(0); setCoachState('idle'); setCoachAdvice(''); setPendingBots([]); setLastAction('New hand loaded. Action is on you.');
+    setMode('turn'); setStreet('Flop'); setSeats(initialSeats); setTimeline(initialTimeline); setSelectedEvent(0); setCoachState('idle'); setCoachAdvice(''); setPendingBots([]); setBotContext(null); setLastAction('New hand loaded. Action is on you.');
   };
   const handleTimelineKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!historyVisible) return;
@@ -175,7 +185,7 @@ function App() {
       <section className="table-panel" aria-labelledby="table-title">
         <header className="top-bar"><div><p className="eyebrow">Texas Hold'em trainer</p><h1 id="table-title">Training Table</h1></div><div className="status-group" aria-label="table state controls">{(['turn', 'showdown', 'review'] as TableMode[]).map((state) => <button className={mode === state ? 'state-chip active' : 'state-chip'} key={state} onClick={() => setMode(state)} type="button">{state === 'turn' ? 'Player Turn' : state[0].toUpperCase() + state.slice(1)}</button>)}</div></header>
         <div className={`table-stage mode-${mode}`}><div className="state-banner" role="status" aria-live="polite"><span>{mode === 'turn' ? 'Player Turn' : mode}</span><p>{activeBot ? `${activeBot.name} is resolving action.` : 'Choose a line, ask the coach, or review the hand.'}</p></div><div className="felt" aria-label="Poker table"><div className="board"><p>Board</p><div className="board-cards">{board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= visibleBoard.length} />)}</div><dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Blinds</dt><dd>$15 / $30</dd></div></dl></div><div className="seats-grid">{seats.map((seat) => <SeatView key={seat.id} seat={seat} mode={mode} />)}</div></div></div>
-        <section className="action-panel" aria-labelledby="actions-title"><div><h2 id="actions-title">Player Actions</h2><p aria-live="polite">{activeBot ? `${activeBot.name} is thinking through position, pot odds, and board texture.` : lastAction}</p></div><div className="action-grid">{['Fold', 'Call $90', 'Raise $270'].map((action) => <button className="primary-action" disabled={mode !== 'turn' || pendingBots.length > 0} key={action} onClick={() => runAction(action)} type="button"><span>{action}</span><small>{mode === 'turn' && !pendingBots.length ? 'Available' : 'Locked'}</small></button>)}<button className="ghost-action" onClick={reset} type="button">New Hand</button><button className="ghost-action" onClick={() => setStreet((current) => streets[Math.min(streets.indexOf(current) + 1, streets.length - 1)])} type="button">Next Street</button></div></section>
+        <section className="action-panel" aria-labelledby="actions-title"><div><h2 id="actions-title">Player Actions</h2><p aria-live="polite">{activeBot ? `${activeBot.name} is thinking through position, pot odds, and board texture.` : lastAction}</p></div><div className="action-grid">{['Fold', 'Call $90', 'Raise $270'].map((action) => <button className="primary-action" disabled={mode !== 'turn' || pendingBots.length > 0} key={action} onClick={() => runAction(action)} type="button"><span>{action}</span><small>{mode === 'turn' && !pendingBots.length ? 'Available' : 'Locked'}</small></button>)}<button className="ghost-action" onClick={reset} type="button">New Hand</button><button className="ghost-action" disabled={pendingBots.length > 0} onClick={() => setStreet((current) => streets[Math.min(streets.indexOf(current) + 1, streets.length - 1)])} type="button">Next Street</button></div></section>
       </section>
       <aside className="side-rail" aria-label="Training side panels">
         <section className="coach-panel" aria-labelledby="coach-title"><div className="panel-heading"><div><p className="eyebrow">Opt-in</p><h2 id="coach-title">Coach</h2></div><button onClick={askCoach} type="button">Ask</button></div>{coachState === 'idle' && <p className="muted">Coach is hidden until requested, so table decisions stay primary.</p>}{coachState === 'loading' && <div className="coach-state" role="status" aria-live="polite"><span className="spinner" aria-hidden="true" />Loading range advice...</div>}{coachState === 'ready' && <div className="coach-card"><strong>Suggested line: raise for value to about 65-75% pot</strong><p>{coachAdvice}</p></div>}{coachState === 'error' && <div className="error-box" role="alert">Coach failed to load. Keep playing or retry when the trainer reconnects.</div>}<button className="text-button" onClick={() => setCoachState('error')} type="button">Simulate coach error</button></section>
