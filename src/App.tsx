@@ -21,7 +21,7 @@ type Seat = {
 };
 type TimelineEvent = { street: string; actor: string; action: string; amount?: number; note: string };
 type BotDecision = { action: string; amount: number; status: string; note: string };
-type BotContext = { street: Street; visibleBoard: Card[]; pot: number; highBet: number };
+type BotContext = { street: Street; visibleBoard: Card[] };
 
 const suitLabels: Record<Suit, string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 const suitSymbols: Record<Suit, string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
@@ -139,7 +139,7 @@ function App() {
   useEffect(() => {
     if (!activeBot || !botContext || mode !== 'turn') return;
     const timer = window.setTimeout(() => {
-      const decision = getBotDecision(activeBot, botContext.street, botContext.pot, botContext.highBet, botContext.visibleBoard);
+      const decision = getBotDecision(activeBot, botContext.street, pot, highBet, botContext.visibleBoard);
       setSeats((current) => current.map((seat) => seat.id === activeBot.id ? { ...seat, contribution: decision.action === 'Fold' ? seat.contribution : seat.contribution + decision.amount, stack: decision.action === 'Fold' ? seat.stack : Math.max(0, seat.stack - decision.amount), folded: decision.action === 'Fold' || seat.folded, status: decision.status } : seat));
       setTimeline((current) => [...current, { street: botContext.street, actor: activeBot.name, action: decision.action, amount: decision.amount || undefined, note: decision.note }]);
       setLastAction(`${activeBot.name} ${decision.action.toLowerCase()}${decision.amount ? `s ${formatMoney(decision.amount)}` : 's'}.`);
@@ -150,17 +150,15 @@ function App() {
       });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [activeBot, botContext, mode]);
+  }, [activeBot, botContext, highBet, mode, pot]);
 
   const runAction = (action: string) => {
     const amount = action.includes('$') ? Number(action.split('$')[1]) : 0;
     const nextSeats = seats.map((seat) => seat.isHero ? { ...seat, contribution: action === 'Fold' ? seat.contribution : seat.contribution + amount, stack: action === 'Fold' ? seat.stack : Math.max(0, seat.stack - amount), folded: action === 'Fold', status: action === 'Fold' ? 'Folded' : 'Line chosen' } : seat);
-    const nextPot = nextSeats.reduce((sum, seat) => sum + seat.contribution, 0);
-    const nextHighBet = Math.max(...nextSeats.map((seat) => seat.contribution));
     setSeats(nextSeats);
     setTimeline((current) => [...current, { street, actor: 'You', action: action.split(' ')[0], amount: amount || undefined, note: `Hero chooses ${action.toLowerCase()} after weighing ${texture(visibleBoard)} and prior action.` }]);
     setLastAction(`Selected ${action}. Bots are resolving the rest of the street.`);
-    setBotContext({ street, visibleBoard, pot: nextPot, highBet: nextHighBet });
+    setBotContext({ street, visibleBoard });
     setPendingBots(botOrder.filter((id) => nextSeats.some((seat) => seat.id === id && !seat.folded)));
   };
   const askCoach = () => {
