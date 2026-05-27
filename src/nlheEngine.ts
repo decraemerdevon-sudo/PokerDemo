@@ -51,6 +51,7 @@ export type HandState = {
   street: Street;
   board: Card[];
   deck: Card[];
+  burnCards: Card[];
   seats: Seat[];
   currentSeatId: string | null;
   lastAggressorId: string | null;
@@ -81,10 +82,19 @@ function makeEvent(handId: string, street: Street, actor: string, action: string
   return { id: `${handId}-${eventCounter}`, handId, street, actor, action, amount, note, source };
 }
 
-function buildDeck(seed: number) {
+function randomIndex(maxExclusive: number) {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0] % maxExclusive;
+  }
+  return Math.floor(Math.random() * maxExclusive);
+}
+
+function buildDeck() {
   const deck = suits.flatMap((suit) => ranks.map((rank) => ({ rank, suit })));
   for (let i = deck.length - 1; i > 0; i -= 1) {
-    const j = (seed * 31 + i * 17 + seed * i) % (i + 1);
+    const j = randomIndex(i + 1);
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
   return deck;
@@ -100,17 +110,12 @@ function postBlind(seat: Seat, blind: number) {
 }
 
 export function createHand(handNumber = 1): HandState {
-  let deck = buildDeck(handNumber + 13);
+  let deck = buildDeck();
   const seats = playerBlueprints.map((blueprint) => {
     let cards: Card[];
     [cards, deck] = draw(deck, 2);
     return { ...blueprint, contribution: 0, streetContribution: 0, status: 'active' as PlayerStatus, cards, lastAction: 'Waiting' };
   });
-
-  const board: Card[] = [];
-  let boardCards: Card[];
-  [boardCards, deck] = draw(deck, 5);
-  board.push(...boardCards);
 
   const withBlinds = seats.map((seat) => {
     if (seat.role === 'SB') return postBlind(seat, 15);
@@ -126,12 +131,13 @@ export function createHand(handNumber = 1): HandState {
     smallBlind: 15,
     bigBlind: 30,
     street: 'Preflop',
-    board,
+    board: [],
     deck,
+    burnCards: [],
     seats: withBlinds,
     currentSeatId: 'atlas',
     lastAggressorId: 'hero',
-    actedThisRound: ['nash', 'hero'],
+    actedThisRound: [],
     minRaise: 30,
     events: [
       makeEvent(handId, 'Preflop', 'Dealer', 'Deal', 'New NLHE hand dealt.', 'engine'),
@@ -146,8 +152,7 @@ export function createHand(handNumber = 1): HandState {
 }
 
 export function visibleBoard(state: HandState) {
-  const count = state.street === 'Preflop' ? 0 : state.street === 'Flop' ? 3 : state.street === 'Turn' ? 4 : 5;
-  return state.board.slice(0, count);
+  return state.board;
 }
 
 export function potSize(state: HandState) {
@@ -213,40 +218,106 @@ function nextStreet(state: HandState): Street | null {
   return index >= 0 && index < streetOrder.length - 1 ? streetOrder[index + 1] : null;
 }
 
+function dealStreetCards(state: HandState, street: Street) {
+  const burnCards = state.deck.slice(0, 1);
+  const cardCount = street === 'Flop' ? 3 : 1;
+  const dealt = state.deck.slice(1, 1 + cardCount);
+  return {
+    board: [...state.board, ...dealt],
+    burnCards: [...state.burnCards, ...burnCards],
+    deck: state.deck.slice(1 + cardCount),
+  };
+}
+
 function resetForStreet(state: HandState, street: Street): HandState {
   const firstToAct = state.seats.find((seat) => seat.role === 'SB' && seat.status === 'active')?.id ?? state.seats.find((seat) => seat.status === 'active')?.id ?? null;
+  const dealt = dealStreetCards(state, street);
   return {
     ...state,
     street,
+    board: dealt.board,
+    burnCards: dealt.burnCards,
+    deck: dealt.deck,
     currentSeatId: firstToAct,
     lastAggressorId: null,
     actedThisRound: [],
     minRaise: state.bigBlind,
     seats: state.seats.map((seat) => ({ ...seat, streetContribution: 0, lastAction: seat.status === 'folded' ? 'Folded' : `Waiting on ${street}` })),
-    events: [...state.events, makeEvent(state.handId, street, 'Dealer', 'Deal street', `${street} dealt. Betting round starts from the small blind side.`, 'engine')],
+    events: [...state.events, makeEvent(state.handId, street, 'Dealer', 'Deal street', `Burned one and dealt ${street}. Betting round starts from the small blind side.`, 'engine')],
     message: `${street} dealt. ${firstToAct ? seatById(state, firstToAct).name : 'No player'} acts first.`,
   };
 }
 
 function rankValue(rank: Rank) {
-  return ranks.length - ranks.indexOf(rank);
+  return 14 - ranks.indexOf(rank);
 }
 
-function evaluateStrength(cards: Card[]) {
-  const counts = cards.reduce<Record<string, number>>((acc, card) => ({ ...acc, [card.rank]: (acc[card.rank] ?? 0) + 1 }), {});
-  const pairs = Object.values(counts).filter((count) => count === 2).length;
-  const trips = Object.values(counts).some((count) => count === 3);
-  const quads = Object.values(counts).some((count) => count === 4);
-  const flush = suits.some((suit) => cards.filter((card) => card.suit === suit).length >= 5);
-  const high = Math.max(...cards.map((card) => rankValue(card.rank)));
-  return (quads ? 700 : trips && pairs ? 600 : flush ? 500 : trips ? 400 : pairs >= 2 ? 300 : pairs === 1 ? 200 : 100) + high;
+type HandScore = number[];
+
+function compareScores(a: HandScore, b: HandScore) {
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const delta = (a[index] ?? 0) - (b[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+function findStraightHigh(values: number[]) {
+  const unique = Array.from(new Set(values)).sort((a, b) => b - a);
+  if (unique.includes(14)) unique.push(1);
+  for (let index = 0; index <= unique.length - 5; index += 1) {
+    const window = unique.slice(index, index + 5);
+    if (window[0] - window[4] === 4) return window[0];
+  }
+  return 0;
+}
+
+function evaluateFive(cards: Card[]): HandScore {
+  const values = cards.map((card) => rankValue(card.rank)).sort((a, b) => b - a);
+  const flush = cards.every((card) => card.suit === cards[0].suit);
+  const straightHigh = findStraightHigh(values);
+  const groups = Array.from(values.reduce<Map<number, number>>((acc, value) => acc.set(value, (acc.get(value) ?? 0) + 1), new Map()).entries())
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+
+  if (flush && straightHigh) return [8, straightHigh];
+  if (groups[0][1] === 4) return [7, groups[0][0], groups.find(([, count]) => count === 1)?.[0] ?? 0];
+  if (groups[0][1] === 3 && groups[1]?.[1] === 2) return [6, groups[0][0], groups[1][0]];
+  if (flush) return [5, ...values];
+  if (straightHigh) return [4, straightHigh];
+  if (groups[0][1] === 3) return [3, groups[0][0], ...groups.filter(([, count]) => count === 1).map(([value]) => value).sort((a, b) => b - a)];
+  if (groups[0][1] === 2 && groups[1]?.[1] === 2) {
+    const pairs = groups.filter(([, count]) => count === 2).map(([value]) => value).sort((a, b) => b - a);
+    return [2, ...pairs, groups.find(([, count]) => count === 1)?.[0] ?? 0];
+  }
+  if (groups[0][1] === 2) return [1, groups[0][0], ...groups.filter(([, count]) => count === 1).map(([value]) => value).sort((a, b) => b - a)];
+  return [0, ...values];
+}
+
+export function evaluateBestHand(cards: Card[]): HandScore {
+  if (cards.length < 5) return [0, ...cards.map((card) => rankValue(card.rank)).sort((a, b) => b - a)];
+  let best: HandScore = [0];
+  for (let a = 0; a < cards.length - 4; a += 1) {
+    for (let b = a + 1; b < cards.length - 3; b += 1) {
+      for (let c = b + 1; c < cards.length - 2; c += 1) {
+        for (let d = c + 1; d < cards.length - 1; d += 1) {
+          for (let e = d + 1; e < cards.length; e += 1) {
+            const score = evaluateFive([cards[a], cards[b], cards[c], cards[d], cards[e]]);
+            if (compareScores(score, best) > 0) best = score;
+          }
+        }
+      }
+    }
+  }
+  return best;
 }
 
 function awardHand(state: HandState, reason: string): HandState {
   const contenders = activeSeats(state).filter((seat) => seat.status !== 'folded');
-  const winners = contenders.length === 1
-    ? contenders
-    : [...contenders].sort((a, b) => evaluateStrength([...b.cards, ...state.board]) - evaluateStrength([...a.cards, ...state.board])).slice(0, 1);
+  const bestScore = contenders.reduce<HandScore | null>((best, seat) => {
+    const score = evaluateBestHand([...seat.cards, ...state.board]);
+    return !best || compareScores(score, best) > 0 ? score : best;
+  }, null);
+  const winners = contenders.length === 1 ? contenders : contenders.filter((seat) => compareScores(evaluateBestHand([...seat.cards, ...state.board]), bestScore ?? [0]) === 0);
   const pot = potSize(state);
   const winnerIds = winners.map((winner) => winner.id);
   // Side-pot/all-in splitting is intentionally deferred for this slice; all contributions are awarded as one main pot.
@@ -320,7 +391,7 @@ export function chooseBotAction(state: HandState, seatId: string): { kind: Actio
   const seat = seatById(state, seatId);
   const legal = getLegalActions(state, seatId);
   const board = visibleBoard(state);
-  const strength = evaluateStrength([...seat.cards, ...board]);
+  const strength = evaluateBestHand([...seat.cards, ...board])[0] * 100 + (evaluateBestHand([...seat.cards, ...board])[1] ?? 0);
   const call = legal.find((action) => action.kind === 'call');
   const check = legal.find((action) => action.kind === 'check');
   const raise = legal.find((action) => action.kind === 'raise');
