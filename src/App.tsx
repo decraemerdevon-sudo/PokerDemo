@@ -103,6 +103,7 @@ function App() {
   const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
+  const canStartNewHand = state.stage === 'hand-complete';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
 
   useEffect(() => {
@@ -136,6 +137,7 @@ function App() {
   }, [state.events.length]);
 
   const reset = () => {
+    if (!canStartNewHand) return;
     setState((current) => createHand(current.handNumber + 1));
     setSelectedEvent(0);
     setMode('play');
@@ -198,7 +200,7 @@ function App() {
                 <small>{isHeroTurn ? 'Legal' : 'Locked'}</small>
               </button>
             ))}
-            <button className="ghost-action" onClick={reset} type="button">New Hand</button>
+            <button className="ghost-action" disabled={!canStartNewHand} onClick={reset} type="button">{canStartNewHand ? 'New Hand' : 'Hand in progress'}</button>
           </div>
         </section>
       </section>
