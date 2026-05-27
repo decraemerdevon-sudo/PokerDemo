@@ -16,6 +16,7 @@ import {
   visibleBoard,
 } from './nlheEngine';
 import { trackHandHistoryEvent } from './handHistoryAnalytics';
+import { appendCompletedHand, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
 type TableMode = 'play' | 'review';
 type CoachState = 'idle' | 'loading' | 'ready' | 'error';
@@ -88,6 +89,11 @@ function texture(cards: Card[]) {
 
 function cardText(cards: Card[]) {
   return cards.map((card) => `${card.rank}${suitLabels[card.suit]}`).join(' ');
+}
+
+function signedMoney(value: number) {
+  if (value === 0) return '$0';
+  return `${value > 0 ? '+' : '-'}${formatMoney(Math.abs(value))}`;
 }
 
 function buildCoachAdvice(state: HandState) {
@@ -183,6 +189,127 @@ function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) 
   );
 }
 
+function HiddenCards() {
+  return <span className="hidden-cards" aria-label="hidden hole cards">[? ?]</span>;
+}
+
+function HistoryCards({ cards }: { cards: Card[] | null }) {
+  if (!cards) return <HiddenCards />;
+  return <span className="history-cards">{cards.map((card, index) => <CardView key={`${card.rank}-${card.suit}-${index}`} card={card} />)}</span>;
+}
+
+function streetTitle(street: StreetKey, hand: HandRecord) {
+  if (street === 'flop') return `FLOP ${hand.flopCards ? `[${cardText(hand.flopCards)}]` : ''}`;
+  if (street === 'turn') return `TURN ${hand.turnCard ? `[${cardText([hand.turnCard])}]` : ''}`;
+  if (street === 'river') return `RIVER ${hand.riverCard ? `[${cardText([hand.riverCard])}]` : ''}`;
+  return 'PREFLOP';
+}
+
+function HandHistoryPanel({
+  history,
+  selectedHandId,
+  setSelectedHandId,
+  stats,
+  onClose,
+}: {
+  history: HandRecord[];
+  selectedHandId: string | null;
+  setSelectedHandId: (handId: string) => void;
+  stats: PlayerSessionStats[];
+  onClose: () => void;
+}) {
+  const selected = history.find((hand) => hand.handId === selectedHandId) ?? history[0] ?? null;
+  const heroId = selected?.players.find((player) => player.isHero)?.playerId;
+
+  return (
+    <aside className="hand-history-panel" aria-label="Hand history panel">
+      <header className="hand-history-header">
+        <div><p className="eyebrow">Session</p><h2>Hand History</h2></div>
+        <button onClick={onClose} type="button" aria-label="Close hand history">Close</button>
+      </header>
+      <div className="hand-history-content">
+        <section className="session-stats" aria-labelledby="session-stats-title">
+          <h3 id="session-stats-title">Session Stats</h3>
+          <div className="stats-table" role="table" aria-label="Session statistics">
+            <div className="stats-row stats-head" role="row"><span>Player</span><span>VPIP</span><span>PFR</span><span>Net</span></div>
+            {stats.map((stat) => (
+              <div className="stats-row" role="row" key={stat.playerId}>
+                <strong>{stat.displayName}</strong><span>{stat.VPIP}%</span><span>{stat.PFR}%</span><span className={stat.totalNetChips >= 0 ? 'net-positive' : 'net-negative'}>{signedMoney(stat.totalNetChips)}</span>
+              </div>
+            ))}
+          </div>
+          <details>
+            <summary>Full Stats</summary>
+            <div className="full-stats">
+              {stats.map((stat) => (
+                <dl key={stat.playerId}>
+                  <dt>{stat.displayName}</dt>
+                  <dd>3Bet {stat.threebet}%</dd><dd>Fold 3Bet {stat.foldTo3bet}%</dd><dd>AF {stat.AF}</dd><dd>CBet {stat.CBet_flop}%</dd><dd>WTSD {stat.WTSD}%</dd><dd>WSD {stat.WSD}%</dd><dd>bb/100 {stat.bbPer100}</dd>
+                </dl>
+              ))}
+            </div>
+          </details>
+        </section>
+        <section className="hand-list" aria-labelledby="hand-list-title">
+          <h3 id="hand-list-title">Hand List</h3>
+          {history.length === 0 ? <p className="muted">Completed hands will appear here.</p> : history.map((hand) => {
+            const hero = hand.players.find((player) => player.isHero);
+            const winnerNames = hand.pots.map((pot) => hand.players.find((player) => player.playerId === pot.winnerId)?.displayName ?? 'Unknown').join(', ');
+            return (
+              <button className={selected?.handId === hand.handId ? 'hand-list-item active' : 'hand-list-item'} key={hand.handId} onClick={() => setSelectedHandId(hand.handId)} type="button">
+                <strong>#{hand.handNumber}</strong><span>{winnerNames} won</span>{hero && <em className={hero.netResult >= 0 ? 'net-positive' : 'net-negative'}>{signedMoney(hero.netResult)}</em>}
+              </button>
+            );
+          })}
+        </section>
+        <section className="hand-detail" aria-labelledby="hand-detail-title">
+          {!selected ? <div className="empty-state"><strong>No hands yet</strong><p>Play a hand to populate the append-only session log.</p></div> : (
+            <>
+              <h3 id="hand-detail-title">Hand #{selected.handNumber}</h3>
+              <p className="position-line">{selected.players.map((player) => `${player.position}: ${player.displayName}`).join(' | ')}</p>
+              <div className="player-snapshots">
+                {selected.players.map((player) => (
+                  <div className="player-snapshot" key={player.playerId}>
+                    <strong>{player.displayName}</strong><HistoryCards cards={player.holeCards} />
+                    <span>Stack: {formatMoney(player.stackAtHandStart)} to {formatMoney(player.finalStack)}</span>
+                    <em className={player.netResult >= 0 ? 'net-positive' : 'net-negative'}>{signedMoney(player.netResult)}</em>
+                    {player.foldedStreet && <small>folded {player.foldedStreet}</small>}
+                  </div>
+                ))}
+              </div>
+              {(['preflop', 'flop', 'turn', 'river'] as StreetKey[]).map((street) => {
+                const record = selected.streets[street];
+                if (!record) return null;
+                return (
+                  <div className="street-block" key={street}>
+                    <h4>{streetTitle(street, selected)}</h4>
+                    {record.actions.length === 0 ? <p className="muted">No actions.</p> : record.actions.map((action, index) => (
+                      <div className="history-action" key={`${street}-${action.playerId}-${index}`}>
+                        <span>{action.position}</span><strong>{action.displayName}</strong><span>{action.actionType.replace('-', ' ')}</span>
+                        <span>{action.amount ? formatMoney(action.amount) : ''}</span>
+                        <em>{action.betSizingPct ? `${Math.round(action.betSizingPct * 100)}% pot` : ''}</em>
+                        <small>Pot: {formatMoney(action.potAfter)}</small>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+              <div className="street-block result-block">
+                <h4>RESULT</h4>
+                {selected.pots.map((pot) => {
+                  const winner = selected.players.find((player) => player.playerId === pot.winnerId);
+                  const heroNet = selected.players.find((player) => player.playerId === heroId)?.netResult ?? 0;
+                  return <p key={`${pot.label}-${pot.winnerId}`}>{winner?.displayName ?? pot.winnerId} wins {formatMoney(pot.amount)}{pot.winnerHandDescription ? ` (${pot.winnerHandDescription})` : ' without showdown'}. Net: <strong className={heroNet >= 0 ? 'net-positive' : 'net-negative'}>{signedMoney(heroNet)}</strong></p>;
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+    </aside>
+  );
+}
+
 function sourceForAnalytics(event: HandEvent) {
   if (event.source === 'hero') return 'hero-action' as const;
   if (event.source === 'bot') return 'bot-action' as const;
@@ -202,6 +329,9 @@ function App() {
   const [mode, setMode] = useState<TableMode>('play');
   const [selectedEvent, setSelectedEvent] = useState(0);
   const [historyVisible, setHistoryVisible] = useState(true);
+  const [handHistoryOpen, setHandHistoryOpen] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<HandRecord[]>(() => loadSessionHistory());
+  const [selectedHandId, setSelectedHandId] = useState<string | null>(() => loadSessionHistory()[0]?.handId ?? null);
   const [coachState, setCoachState] = useState<CoachState>('idle');
   const [coachAdvice, setCoachAdvice] = useState('');
 
@@ -214,6 +344,7 @@ function App() {
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
+  const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
 
   useEffect(() => {
     const last = state.events[state.events.length - 1];
@@ -247,6 +378,11 @@ function App() {
 
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
+    setSessionHistory((current) => {
+      const next = appendCompletedHand(current, state);
+      setSelectedHandId((selected) => selected ?? next[0]?.handId ?? null);
+      return next;
+    });
     const timer = window.setTimeout(() => {
       setTableState((current) => {
         const syncedTable = syncTableFromHand(current.table, current.hand);
@@ -348,6 +484,10 @@ function App() {
           ) : <div className="empty-state"><strong>Empty history</strong><p>No hand events are selected for review.</p></div>}
         </section>
       </aside>
+      <button className="hand-history-toggle" onClick={() => setHandHistoryOpen((open) => !open)} type="button" aria-expanded={handHistoryOpen}>
+        <span aria-hidden="true">H</span> Hand History
+      </button>
+      {handHistoryOpen && <HandHistoryPanel history={sessionHistory} selectedHandId={selectedHandId} setSelectedHandId={setSelectedHandId} stats={sessionStats} onClose={() => setHandHistoryOpen(false)} />}
     </main>
   );
 }
