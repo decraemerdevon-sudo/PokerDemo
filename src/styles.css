@@ -353,6 +353,7 @@ dd {
 
 .primary-action,
 .ghost-action,
+.auto-hand-status,
 .panel-heading button,
 .text-button {
   min-height: 44px;
@@ -377,6 +378,18 @@ dd {
   color: #201c16;
   font-weight: 800;
   padding: 0 12px;
+}
+
+.auto-hand-status {
+  align-items: center;
+  background: #e7dfd0;
+  border-radius: 8px;
+  color: #342d20;
+  display: flex;
+  font-weight: 800;
+  justify-content: center;
+  padding: 0 12px;
+  text-align: center;
 }
 
 .side-rail {
