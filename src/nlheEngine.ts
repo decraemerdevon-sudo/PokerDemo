@@ -387,20 +387,267 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
   return settleAfterAction(nextState, seatId);
 }
 
+type HandTier = 1 | 2 | 3 | 4 | 5;
+
+function randomFloat() {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0] / (0xffffffff + 1);
+  }
+  return Math.random();
+}
+
+function weightedChoice(options: number[], weights: number[]) {
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  let roll = randomFloat() * total;
+  for (let index = 0; index < options.length; index += 1) {
+    roll -= weights[index];
+    if (roll <= 0) return options[index];
+  }
+  return options[options.length - 1];
+}
+
+function canonicalHole(cards: Card[]) {
+  const sorted = [...cards].sort((a, b) => rankValue(b.rank) - rankValue(a.rank));
+  const first = sorted[0];
+  const second = sorted[1];
+  const suited = first.suit === second.suit;
+  const pair = first.rank === second.rank;
+  return {
+    high: first,
+    low: second,
+    suited,
+    pair,
+    key: pair ? `${first.rank}${second.rank}` : `${first.rank}${second.rank}${suited ? 's' : 'o'}`,
+  };
+}
+
+function classifyPreflopHand(cards: Card[]): HandTier {
+  const { key, pair, high, low, suited } = canonicalHole(cards);
+  const highValue = rankValue(high.rank);
+  const lowValue = rankValue(low.rank);
+  const gap = highValue - lowValue;
+
+  if (['AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo'].includes(key)) return 1;
+  if (['TT', '99', 'AQs', 'AQo', 'AJs', 'KQs', 'ATs'].includes(key)) return 2;
+  if (['88', '77', '66', 'KJs', 'KTs', 'QJs', 'QTs', 'JTs', 'T9s', 'KQo', 'AJo', 'ATo'].includes(key)) return 3;
+  if (high.rank === 'A' && suited && lowValue >= 2 && lowValue <= 9) return 3;
+  if (['55', '44', '33', '22', '98s', '87s', '76s', '65s', '54s', 'KJo', 'QJo', 'K9s', 'Q9s', 'J9s'].includes(key)) return 4;
+  if (pair && highValue <= 5) return 4;
+  if (suited && gap === 1 && highValue <= 9 && lowValue >= 4) return 4;
+  return 5;
+}
+
+function rankCounts(cards: Card[]) {
+  return cards.reduce<Map<number, number>>((counts, card) => counts.set(rankValue(card.rank), (counts.get(rankValue(card.rank)) ?? 0) + 1), new Map());
+}
+
+function hasFlushDraw(cards: Card[]) {
+  const suitCounts = cards.reduce<Record<Suit, number>>((counts, card) => ({ ...counts, [card.suit]: counts[card.suit] + 1 }), { spades: 0, hearts: 0, diamonds: 0, clubs: 0 });
+  return Object.values(suitCounts).some((count) => count === 4);
+}
+
+function straightDrawKind(cards: Card[]): 'oesd' | 'gutshot' | null {
+  const values = Array.from(new Set(cards.flatMap((card) => rankValue(card.rank) === 14 ? [14, 1] : [rankValue(card.rank)])));
+  for (let low = 1; low <= 10; low += 1) {
+    const window = [low, low + 1, low + 2, low + 3, low + 4];
+    const held = window.filter((value) => values.includes(value)).length;
+    if (held !== 4) continue;
+    const missing = window.find((value) => !values.includes(value)) ?? 0;
+    if (missing === low || missing === low + 4) return 'oesd';
+    return 'gutshot';
+  }
+  return null;
+}
+
+function hasTwoOvercards(holeCards: Card[], board: Card[]) {
+  if (board.length === 0) return false;
+  const boardHigh = Math.max(...board.map((card) => rankValue(card.rank)));
+  return holeCards.every((card) => rankValue(card.rank) > boardHigh);
+}
+
+function madeHandBaseEquity(score: HandScore) {
+  if (score[0] >= 4) return 0.88;
+  if (score[0] === 3) return 0.82;
+  if (score[0] === 2) return 0.72;
+  if (score[0] === 1) return 0.48;
+  return 0.08;
+}
+
+function countOuts(holeCards: Card[], board: Card[]) {
+  const cards = [...holeCards, ...board];
+  let outs = 0;
+  if (hasFlushDraw(cards)) outs += 9;
+  const straightDraw = straightDrawKind(cards);
+  if (straightDraw === 'oesd') outs += 8;
+  else if (straightDraw === 'gutshot') outs += 4;
+  if (hasTwoOvercards(holeCards, board) && outs === 0) outs += 6;
+
+  const counts = rankCounts(cards);
+  if (holeCards.some((card) => counts.get(rankValue(card.rank)) === 2)) outs += 2;
+  return Math.min(15, outs);
+}
+
+function estimateEquity(holeCards: Card[], board: Card[], street: Street) {
+  const outs = countOuts(holeCards, board);
+  const drawEquity = street === 'Flop' ? outs * 0.04 : street === 'Turn' ? outs * 0.02 : 0;
+  return Math.max(drawEquity, madeHandBaseEquity(evaluateBestHand([...holeCards, ...board])));
+}
+
+function classifyPostflopHand(holeCards: Card[], board: Card[], street: Street): HandTier {
+  const score = evaluateBestHand([...holeCards, ...board]);
+  const boardRanks = board.map((card) => rankValue(card.rank));
+  const topBoard = Math.max(...boardRanks);
+  const counts = rankCounts([...holeCards, ...board]);
+  const holeValues = holeCards.map((card) => rankValue(card.rank));
+  const hasPairWithBoard = holeValues.some((value) => boardRanks.includes(value));
+  const topPair = holeValues.includes(topBoard);
+  const bestKicker = Math.max(...holeValues.filter((value) => value !== topBoard), 0);
+  const overpair = holeCards[0].rank === holeCards[1].rank && holeValues[0] > topBoard;
+  const draw = straightDrawKind([...holeCards, ...board]);
+  const flushDraw = hasFlushDraw([...holeCards, ...board]);
+
+  if (score[0] >= 3 || score[0] === 2) return 1;
+  if (topPair && bestKicker >= 14) return 1;
+  if (topPair || overpair || (hasPairWithBoard && Math.max(...holeValues) >= topBoard - 1)) return 2;
+  if (street === 'Flop' && (flushDraw || draw === 'oesd')) return 2;
+  if (hasPairWithBoard || flushDraw || draw || holeValues.some((value) => counts.get(value) === 2)) return 3;
+  if (hasTwoOvercards(holeCards, board) || holeCards.some((card) => rankValue(card.rank) >= 12)) return 4;
+  return 5;
+}
+
+function positionCategory(role: SeatRole): 'early' | 'middle' | 'late' | 'blind' {
+  if (role === 'CO') return 'middle';
+  if (role === 'BTN') return 'late';
+  return 'blind';
+}
+
+function isInPosition(state: HandState, seat: Seat) {
+  if (state.street === 'Preflop') return positionCategory(seat.role) === 'late';
+  if (state.seats.filter((candidate) => candidate.status === 'active').length <= 2) return seat.role === 'BTN';
+  return seat.role === 'BTN' || seat.role === 'CO';
+}
+
+function countCallers(state: HandState) {
+  const highBet = currentBet(state);
+  return state.seats.filter((seat) => seat.id !== state.lastAggressorId && seat.streetContribution === highBet && highBet > state.bigBlind).length;
+}
+
+function hasSuitedConnector(cards: Card[]) {
+  const { suited, high, low } = canonicalHole(cards);
+  return suited && rankValue(high.rank) - rankValue(low.rank) === 1;
+}
+
+function clampTarget(action: LegalAction, desiredAmountToAdd: number, currentContribution: number) {
+  const desiredTarget = currentContribution + Math.max(0, Math.round(desiredAmountToAdd));
+  return Math.min(action.max ?? desiredTarget, Math.max(action.min ?? action.targetContribution, desiredTarget));
+}
+
+function clampTotalTarget(action: LegalAction, desiredTarget: number) {
+  const roundedTarget = Math.round(desiredTarget);
+  return Math.min(action.max ?? roundedTarget, Math.max(action.min ?? action.targetContribution, roundedTarget));
+}
+
+function valueBetSize(pot: number, street: Street, tier: HandTier) {
+  if (street === 'Flop') return weightedChoice([0.33, 0.5, 0.75], [0.3, 0.4, 0.3]) * pot;
+  if (street === 'Turn') return 0.66 * pot;
+  if (street === 'River') return (tier === 1 ? 0.75 : 0.5) * pot;
+  return 0.5 * pot;
+}
+
+function impliedOdds(state: HandState, seat: Seat, street: Street) {
+  if (street === 'River') return 0;
+  const stackToPot = seat.stack / Math.max(1, potSize(state));
+  return Math.min(0.18, stackToPot / 100 + (street === 'Flop' ? 0.08 : 0.03));
+}
+
 export function chooseBotAction(state: HandState, seatId: string): { kind: ActionKind; targetContribution?: number } {
   const seat = seatById(state, seatId);
   const legal = getLegalActions(state, seatId);
-  const board = visibleBoard(state);
-  const strength = evaluateBestHand([...seat.cards, ...board])[0] * 100 + (evaluateBestHand([...seat.cards, ...board])[1] ?? 0);
   const call = legal.find((action) => action.kind === 'call');
   const check = legal.find((action) => action.kind === 'check');
   const raise = legal.find((action) => action.kind === 'raise');
   const bet = legal.find((action) => action.kind === 'bet');
+  const pot = potSize(state);
+  const currentTableBet = currentBet(state);
 
-  if (call && call.amountToPutIn > seat.stack * 0.22 && strength < 220) return { kind: 'fold' };
-  if (raise && (strength >= 305 || seat.style === 'pressure')) return { kind: 'raise', targetContribution: Math.min(raise.max ?? raise.targetContribution, raise.targetContribution + (seat.style === 'pressure' ? 30 : 0)) };
-  if (bet && strength >= 250) return { kind: 'bet', targetContribution: Math.min(bet.max ?? bet.targetContribution, Math.max(bet.targetContribution, Math.round(potSize(state) * 0.55))) };
-  if (call) return { kind: 'call' };
-  if (check) return { kind: 'check' };
+  if (state.street === 'Preflop') {
+    const tier = classifyPreflopHand(seat.cards);
+    const facingRaise = currentTableBet > state.bigBlind;
+    const potOdds = call ? call.amountToPutIn / Math.max(1, pot + call.amountToPutIn) : 0;
+    const stackToPot = seat.stack / Math.max(1, pot);
+    const position = seat.role;
+    const callers = countCallers(state);
+    const openAction = raise ?? bet;
+
+    if (!facingRaise) {
+      if (openAction && (tier === 1 || tier === 2)) return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, 2.5 * state.bigBlind) };
+      if (openAction && tier === 3 && (['CO', 'BTN', 'HJ'].includes(position) || position === 'SB')) {
+        return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, (position === 'SB' ? 3 : 2.5) * state.bigBlind) };
+      }
+      if (openAction && tier === 4 && (position === 'BTN' || (['CO', 'HJ'].includes(position) && callers === 0))) {
+        return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, 2.5 * state.bigBlind) };
+      }
+      if (check) return { kind: 'check' };
+      return { kind: 'fold' };
+    }
+
+    const facingThreeBet = currentTableBet >= state.bigBlind * 7.5;
+    if (facingThreeBet) {
+      if (raise && tier === 1) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 2.5 * currentTableBet) };
+      if (call && tier <= 2) return { kind: 'call' };
+      return { kind: 'fold' };
+    }
+
+    if (raise && tier === 1) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
+    if (tier === 2) {
+      if (raise && ['BTN', 'CO'].includes(position)) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
+      if (call) return { kind: 'call' };
+    }
+    if (call && tier === 3 && potOdds < 0.25) return { kind: 'call' };
+    if (call && tier === 4 && hasSuitedConnector(seat.cards) && potOdds < 0.15 && stackToPot > 15) return { kind: 'call' };
+    return { kind: 'fold' };
+  }
+
+  const board = visibleBoard(state);
+  const tier = classifyPostflopHand(seat.cards, board, state.street);
+  const ip = isInPosition(state, seat);
+
+  if (!call) {
+    if (bet && tier === 1) {
+      if (ip && randomFloat() >= 0.7 && check) return { kind: 'check' };
+      return { kind: 'bet', targetContribution: clampTarget(bet, valueBetSize(pot, state.street, tier), seat.streetContribution) };
+    }
+    if (bet && tier === 2) {
+      if (ip) return { kind: 'bet', targetContribution: clampTarget(bet, 0.5 * pot, seat.streetContribution) };
+      if (state.street === 'Flop') return { kind: 'bet', targetContribution: clampTarget(bet, 0.4 * pot, seat.streetContribution) };
+      if (check) return { kind: 'check' };
+    }
+    if (bet && tier === 3 && !ip && state.street === 'Flop' && (hasFlushDraw([...seat.cards, ...board]) || straightDrawKind([...seat.cards, ...board]) === 'oesd')) {
+      return { kind: 'bet', targetContribution: clampTarget(bet, 0.5 * pot, seat.streetContribution) };
+    }
+    if (bet && tier === 4 && ip) {
+      const bluffFrequency = state.street === 'River' ? 0.25 : 0.33;
+      const bluffSize = state.street === 'River' ? 0.75 : 0.5;
+      if (randomFloat() < bluffFrequency) return { kind: 'bet', targetContribution: clampTarget(bet, bluffSize * pot, seat.streetContribution) };
+    }
+    if (check) return { kind: 'check' };
+    return { kind: 'fold' };
+  }
+
+  const potOdds = call.amountToPutIn / Math.max(1, pot + call.amountToPutIn);
+  const equity = estimateEquity(seat.cards, board, state.street);
+
+  if (tier === 1) {
+    if (raise) return { kind: 'raise', targetContribution: clampTarget(raise, (call.amountToPutIn < 0.3 * pot ? 3 : 2.5) * call.amountToPutIn, seat.streetContribution) };
+    return { kind: 'call' };
+  }
+  if (tier === 2) return equity > potOdds ? { kind: 'call' } : { kind: 'fold' };
+  if (tier === 3) {
+    if (state.street !== 'River' && equity + impliedOdds(state, seat, state.street) > potOdds) return { kind: 'call' };
+    return { kind: 'fold' };
+  }
+  if (tier === 4 && potOdds < 0.2) return { kind: 'call' };
   return { kind: 'fold' };
 }
