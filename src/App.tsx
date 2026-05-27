@@ -17,12 +17,62 @@ import { trackHandHistoryEvent } from './handHistoryAnalytics';
 
 type TableMode = 'play' | 'review';
 type CoachState = 'idle' | 'loading' | 'ready' | 'error';
+type ChipDenomination = {
+  value: number;
+  color: string;
+  borderColor: string;
+  label: string;
+};
+type ChipStack = {
+  denomination: ChipDenomination;
+  count: number;
+};
+
+const CHIP_DENOMINATIONS: ChipDenomination[] = [
+  { value: 1000, color: '#FFD700', borderColor: '#B8860B', label: '1K' },
+  { value: 100, color: '#1a1a1a', borderColor: '#555555', label: '100' },
+  { value: 25, color: '#228B22', borderColor: '#145214', label: '25' },
+  { value: 5, color: '#CC0000', borderColor: '#8B0000', label: '5' },
+  { value: 1, color: '#F5F5F5', borderColor: '#AAAAAA', label: '1' },
+];
+const fourSeatAngles = [315, 45, 225, 135];
 
 const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 const suitSymbols: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 
 function formatMoney(value: number) {
   return `$${value.toLocaleString()}`;
+}
+
+function breakIntoChips(amount: number): ChipStack[] {
+  let remaining = Math.max(0, Math.floor(amount));
+  const stacks: ChipStack[] = [];
+
+  CHIP_DENOMINATIONS.forEach((denomination) => {
+    if (remaining <= 0) return;
+    const count = Math.floor(remaining / denomination.value);
+    if (count > 0) {
+      stacks.push({ denomination, count });
+      remaining -= count * denomination.value;
+    }
+  });
+
+  if (remaining !== 0) console.warn(`Unable to render exact chip amount; ${remaining} remains.`);
+  return stacks;
+}
+
+function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
+  const chipOffset = seatRadius * 0.38;
+  const angleRad = (seatAngle - 90) * (Math.PI / 180);
+  return {
+    x: tableCenter.x + (seatRadius - chipOffset) * Math.cos(angleRad),
+    y: tableCenter.y + (seatRadius - chipOffset) * Math.sin(angleRad),
+  };
+}
+
+function seatAngleForIndex(index: number, seatCount: number) {
+  if (seatCount === 4) return fourSeatAngles[index] ?? 0;
+  return (index * 360) / Math.max(seatCount, 1);
 }
 
 function texture(cards: Card[]) {
@@ -60,6 +110,48 @@ function CardView({ card, hidden = false }: { card: Card; hidden?: boolean }) {
   );
 }
 
+function ChipStackView({ stack, size }: { stack: ChipStack; size: 'player' | 'pot' }) {
+  const visibleCount = Math.min(stack.count, 10);
+  const labelColor = stack.denomination.value === 1 || stack.denomination.value === 1000 ? '#17130c' : '#fffdf7';
+  return (
+    <div className="chip-stack" aria-label={`${stack.count} ${stack.denomination.label} chips`}>
+      {stack.count > visibleCount && <span className="chip-count">x{stack.count}</span>}
+      <div className={`chip-column chip-column-${size}`}>
+        {Array.from({ length: visibleCount }, (_, index) => (
+          <span
+            aria-hidden="true"
+            className="casino-chip"
+            key={`${stack.denomination.value}-${index}`}
+            style={{
+              backgroundColor: stack.denomination.color,
+              borderColor: stack.denomination.borderColor,
+              color: labelColor,
+              bottom: index * (size === 'player' ? 4 : 3),
+              zIndex: index,
+            }}
+          >
+            {index === visibleCount - 1 ? stack.denomination.label : ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChipStacksView({ amount, label, size = 'player' }: { amount: number; label?: string; size?: 'player' | 'pot' }) {
+  const stacks = breakIntoChips(amount);
+  if (!stacks.length) return null;
+  return (
+    <div className={`chip-display chip-display-${size}`} aria-label={`${label ? `${label}: ` : ''}${formatMoney(amount)} in chips`}>
+      {label && <span className="chip-display-label">{label}</span>}
+      <div className="chip-stacks">
+        {stacks.map((stack) => <ChipStackView key={stack.denomination.value} stack={stack} size={size} />)}
+      </div>
+      <strong>{formatMoney(amount)}</strong>
+    </div>
+  );
+}
+
 function SeatView({ seat, street, reveal }: { seat: Seat; street: Street; reveal: boolean }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
   return (
@@ -76,6 +168,16 @@ function SeatView({ seat, street, reveal }: { seat: Seat; street: Street; reveal
         <div><dt>In pot</dt><dd>{formatMoney(seat.contribution)}</dd></div>
       </dl>
     </article>
+  );
+}
+
+function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) {
+  if (seat.streetContribution <= 0) return null;
+  const position = getChipPosition(seatAngle, { x: 50, y: 50 }, 56);
+  return (
+    <div className="player-bet-chips" style={{ left: `${position.x}%`, top: `${position.y}%` }}>
+      <ChipStacksView amount={seat.streetContribution} label={seat.name} />
+    </div>
   );
 }
 
@@ -185,6 +287,10 @@ function App() {
             <p>{state.message}</p>
           </div>
           <div className="felt" aria-label="Poker table">
+            <div className="pot-chip-area">
+              <ChipStacksView amount={pot} label="Pot" size="pot" />
+            </div>
+            {state.seats.map((seat, index) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(index, state.seats.length)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>

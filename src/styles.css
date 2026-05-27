@@ -186,6 +186,121 @@ h3 {
   z-index: 2;
 }
 
+.pot-chip-area,
+.player-bet-chips {
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.pot-chip-area {
+  left: 50%;
+  top: calc(50% + 102px);
+}
+
+.player-bet-chips {
+  transition: left 180ms ease, top 180ms ease;
+}
+
+.chip-display {
+  align-items: center;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  min-width: max-content;
+}
+
+.chip-display-label {
+  background: rgba(12, 28, 25, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: #fffaf1;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.chip-display strong {
+  background: rgba(255, 250, 241, 0.94);
+  border: 1px solid rgba(31, 39, 31, 0.16);
+  border-radius: 999px;
+  color: #1f271f;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.chip-stacks {
+  align-items: flex-end;
+  display: flex;
+  gap: 7px;
+  justify-content: center;
+  min-height: 70px;
+}
+
+.chip-display-pot .chip-stacks {
+  gap: 5px;
+  min-height: 52px;
+}
+
+.chip-stack {
+  align-items: center;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+}
+
+.chip-count {
+  background: #fffaf1;
+  border: 1px solid #d8ceba;
+  border-radius: 999px;
+  color: #1f271f;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+.chip-column {
+  position: relative;
+}
+
+.chip-column-player {
+  height: 68px;
+  width: 30px;
+}
+
+.chip-column-pot {
+  height: 50px;
+  width: 24px;
+}
+
+.casino-chip {
+  align-items: center;
+  border: 3px solid;
+  border-radius: 50%;
+  box-shadow: 0 3px 5px rgba(0, 0, 0, 0.26), inset 0 0 0 3px rgba(255, 255, 255, 0.2);
+  display: flex;
+  font-size: 0.58rem;
+  font-weight: 950;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  position: absolute;
+  text-align: center;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.2);
+  width: 30px;
+}
+
+.chip-column-pot .casino-chip {
+  border-width: 2px;
+  font-size: 0.48rem;
+  height: 24px;
+  width: 24px;
+}
+
 .board p {
   color: #d9eee7;
   font-weight: 800;
