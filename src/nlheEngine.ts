@@ -1,7 +1,7 @@
 export type Suit = 'spades' | 'hearts' | 'diamonds' | 'clubs';
 export type Rank = 'A' | 'K' | 'Q' | 'J' | '10' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2';
 export type Street = 'Preflop' | 'Flop' | 'Turn' | 'River' | 'Showdown';
-export type SeatRole = 'BTN' | 'SB' | 'BB' | 'CO';
+export type SeatRole = 'BTN' | 'SB' | 'BB' | 'UTG' | 'UTG+1' | 'MP' | 'MP+1' | 'HJ' | 'CO' | 'BTN/SB';
 export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'out';
 export type ActionKind = 'fold' | 'check' | 'call' | 'bet' | 'raise';
 export type EngineStage = 'awaiting-action' | 'hand-complete';
@@ -9,6 +9,7 @@ export type BotStyle = 'loose-aggressive' | 'balanced' | 'pressure';
 
 export type Card = { rank: Rank; suit: Suit };
 export type Seat = {
+  seatIndex: number;
   id: string;
   name: string;
   role: SeatRole;
@@ -20,6 +21,28 @@ export type Seat = {
   isHero?: boolean;
   style?: BotStyle;
   lastAction: string;
+};
+
+export type TableSeat = {
+  seatIndex: number;
+  playerId: string | null;
+  name: string;
+  chips: number;
+  isActive: boolean;
+  isHero?: boolean;
+  style?: BotStyle;
+};
+
+export type TableState = {
+  seats: TableSeat[];
+  buttonSeatIndex: number;
+  handNumber: number;
+};
+
+export type PositionMap = {
+  positions: Partial<Record<SeatRole, number>>;
+  preflopActionOrder: number[];
+  postflopActionOrder: number[];
 };
 
 export type LegalAction = {
@@ -45,7 +68,7 @@ export type HandEvent = {
 export type HandState = {
   handId: string;
   handNumber: number;
-  dealerIndex: number;
+  buttonSeatIndex: number;
   smallBlind: number;
   bigBlind: number;
   street: Street;
@@ -68,11 +91,11 @@ const ranks: Rank[] = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '
 const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
 const streetOrder: Street[] = ['Preflop', 'Flop', 'Turn', 'River'];
 
-const playerBlueprints = [
-  { id: 'mira', name: 'Mira', role: 'BTN' as SeatRole, stack: 1500, style: 'loose-aggressive' as BotStyle },
-  { id: 'nash', name: 'Nash Bot', role: 'SB' as SeatRole, stack: 1000, style: 'balanced' as BotStyle },
-  { id: 'hero', name: 'You', role: 'BB' as SeatRole, stack: 1500, isHero: true },
-  { id: 'atlas', name: 'Atlas', role: 'CO' as SeatRole, stack: 1080, style: 'pressure' as BotStyle },
+const playerBlueprints: TableSeat[] = [
+  { seatIndex: 0, playerId: 'mira', name: 'Mira', chips: 1500, isActive: true, style: 'loose-aggressive' },
+  { seatIndex: 1, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
+  { seatIndex: 2, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
+  { seatIndex: 3, playerId: 'atlas', name: 'Atlas', chips: 1080, isActive: true, style: 'pressure' },
 ];
 
 let eventCounter = 0;
@@ -109,25 +132,150 @@ function postBlind(seat: Seat, blind: number) {
   return { ...seat, stack: seat.stack - amount, contribution: amount, streetContribution: amount, status: amount < blind ? 'all-in' as PlayerStatus : seat.status, lastAction: `Posted ${amount}` };
 }
 
-export function createHand(handNumber = 1): HandState {
+function activeTableSeats(table: TableState) {
+  return table.seats.filter((seat) => seat.playerId !== null && seat.chips > 0 && seat.isActive);
+}
+
+export function createInitialTable(seats: TableSeat[] = playerBlueprints): TableState {
+  const normalizedSeats = seats.map((seat, index) => ({ ...seat, seatIndex: seat.seatIndex ?? index }));
+  const activeSeats = normalizedSeats.filter((seat) => seat.playerId !== null && seat.chips > 0 && seat.isActive);
+  if (activeSeats.length < 2) throw new Error('At least two active players are required to start a table');
+  const firstSeatIndex = activeSeats.sort((a, b) => a.seatIndex - b.seatIndex)[0].seatIndex;
+  return {
+    seats: normalizedSeats,
+    buttonSeatIndex: (firstSeatIndex - 1 + normalizedSeats.length) % normalizedSeats.length,
+    handNumber: 0,
+  };
+}
+
+export function syncTableFromHand(table: TableState, hand: HandState): TableState {
+  const stacksBySeatIndex = new Map(hand.seats.map((seat) => [seat.seatIndex, seat.stack]));
+  return {
+    ...table,
+    seats: table.seats.map((seat) => {
+      const chips = stacksBySeatIndex.get(seat.seatIndex) ?? seat.chips;
+      return { ...seat, chips, isActive: seat.isActive && chips > 0 };
+    }),
+  };
+}
+
+export function advanceButton(table: TableState): number {
+  const totalSeats = table.seats.length;
+  const playableSeats = activeTableSeats(table);
+  if (playableSeats.length < 2) throw new Error('Cannot advance button with fewer than two active players');
+
+  for (let offset = 1; offset <= totalSeats; offset += 1) {
+    const candidateIndex = (table.buttonSeatIndex + offset) % totalSeats;
+    const seat = table.seats[candidateIndex];
+    if (seat.playerId !== null && seat.chips > 0 && seat.isActive) {
+      table.buttonSeatIndex = candidateIndex;
+      return candidateIndex;
+    }
+  }
+
+  throw new Error('No valid seat for button advancement');
+}
+
+function rotateSoFirstIsAfter(activeSeatIndices: number[], buttonSeatIndex: number) {
+  const buttonPosition = activeSeatIndices.indexOf(buttonSeatIndex);
+  if (buttonPosition === -1) throw new Error('Button must be on an active seat before assigning positions');
+  return [...activeSeatIndices.slice(buttonPosition + 1), ...activeSeatIndices.slice(0, buttonPosition + 1)];
+}
+
+export function buildPositionLabels(numActive: number): SeatRole[] {
+  switch (numActive) {
+    case 2: return ['BB', 'BTN/SB'];
+    case 3: return ['SB', 'BB', 'BTN'];
+    case 4: return ['SB', 'BB', 'CO', 'BTN'];
+    case 5: return ['SB', 'BB', 'UTG', 'CO', 'BTN'];
+    case 6: return ['SB', 'BB', 'UTG', 'MP', 'CO', 'BTN'];
+    case 7: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'CO', 'BTN'];
+    case 8: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'HJ', 'CO', 'BTN'];
+    case 9: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO', 'BTN'];
+    default: return (['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO', 'BTN'] as SeatRole[]).slice(0, numActive);
+  }
+}
+
+export function assignBlindsAndPositions(table: TableState): PositionMap {
+  const activeSeatIndices = activeTableSeats(table).map((seat) => seat.seatIndex).sort((a, b) => a - b);
+  const orderedFromButton = rotateSoFirstIsAfter(activeSeatIndices, table.buttonSeatIndex);
+  const numActive = orderedFromButton.length;
+
+  if (numActive < 2) throw new Error('At least two active players are required to assign positions');
+
+  if (numActive === 2) {
+    return {
+      positions: {
+        BTN: orderedFromButton[1],
+        SB: orderedFromButton[1],
+        BB: orderedFromButton[0],
+        UTG: orderedFromButton[1],
+      },
+      preflopActionOrder: [orderedFromButton[1], orderedFromButton[0]],
+      postflopActionOrder: [orderedFromButton[0], orderedFromButton[1]],
+    };
+  }
+
+  const labels = buildPositionLabels(numActive);
+  const positions = orderedFromButton.reduce<Partial<Record<SeatRole, number>>>((acc, seatIndex, index) => {
+    acc[labels[index]] = seatIndex;
+    return acc;
+  }, {});
+
+  return {
+    positions,
+    preflopActionOrder: [...orderedFromButton.slice(2), orderedFromButton[0], orderedFromButton[1]],
+    postflopActionOrder: orderedFromButton,
+  };
+}
+
+function roleForSeat(seatIndex: number, positions: PositionMap['positions']): SeatRole {
+  if (positions.BTN === seatIndex && positions.SB === seatIndex) return 'BTN/SB';
+  const role = Object.entries(positions).find(([, positionedSeat]) => positionedSeat === seatIndex)?.[0] as SeatRole | undefined;
+  if (!role) throw new Error(`No position assigned for seat ${seatIndex}`);
+  return role;
+}
+
+export function createHand(tableOrHandNumber: TableState | number = createInitialTable()): HandState {
+  const table = typeof tableOrHandNumber === 'number' ? createInitialTable() : tableOrHandNumber;
+  advanceButton(table);
+  table.handNumber = typeof tableOrHandNumber === 'number' ? tableOrHandNumber : table.handNumber + 1;
+  const positionMap = assignBlindsAndPositions(table);
   let deck = buildDeck();
-  const seats = playerBlueprints.map((blueprint) => {
+  const seats = activeTableSeats(table).sort((a, b) => a.seatIndex - b.seatIndex).map((tableSeat) => {
     let cards: Card[];
     [cards, deck] = draw(deck, 2);
-    return { ...blueprint, contribution: 0, streetContribution: 0, status: 'active' as PlayerStatus, cards, lastAction: 'Waiting' };
+    return {
+      seatIndex: tableSeat.seatIndex,
+      id: tableSeat.playerId!,
+      name: tableSeat.name,
+      role: roleForSeat(tableSeat.seatIndex, positionMap.positions),
+      stack: tableSeat.chips,
+      contribution: 0,
+      streetContribution: 0,
+      status: 'active' as PlayerStatus,
+      cards,
+      isHero: tableSeat.isHero,
+      style: tableSeat.style,
+      lastAction: 'Waiting',
+    };
   });
 
   const withBlinds = seats.map((seat) => {
-    if (seat.role === 'SB') return postBlind(seat, 15);
+    if (seat.role === 'SB' || seat.role === 'BTN/SB') return postBlind(seat, 15);
     if (seat.role === 'BB') return postBlind(seat, 30);
     return seat;
   });
 
-  const handId = `hand-${handNumber}`;
+  const handId = `hand-${table.handNumber}`;
+  const smallBlindSeat = withBlinds.find((seat) => seat.role === 'SB' || seat.role === 'BTN/SB');
+  const bigBlindSeat = withBlinds.find((seat) => seat.role === 'BB');
+  const firstToActSeatIndex = positionMap.preflopActionOrder[0];
+  const firstToAct = withBlinds.find((seat) => seat.seatIndex === firstToActSeatIndex) ?? withBlinds.find((seat) => seat.status === 'active');
   return {
     handId,
-    handNumber,
-    dealerIndex: 0,
+    handNumber: table.handNumber,
+    buttonSeatIndex: table.buttonSeatIndex,
     smallBlind: 15,
     bigBlind: 30,
     street: 'Preflop',
@@ -135,20 +283,26 @@ export function createHand(handNumber = 1): HandState {
     deck,
     burnCards: [],
     seats: withBlinds,
-    currentSeatId: 'atlas',
-    lastAggressorId: 'hero',
+    currentSeatId: firstToAct?.id ?? null,
+    lastAggressorId: bigBlindSeat?.id ?? null,
     actedThisRound: [],
     minRaise: 30,
     events: [
       makeEvent(handId, 'Preflop', 'Dealer', 'Deal', 'New NLHE hand dealt.', 'engine'),
-      makeEvent(handId, 'Preflop', 'Nash Bot', 'Small blind', 'Nash posts the small blind.', 'engine', 15),
-      makeEvent(handId, 'Preflop', 'You', 'Big blind', 'Hero posts the big blind.', 'engine', 30),
-    ],
+      smallBlindSeat ? makeEvent(handId, 'Preflop', smallBlindSeat.name, 'Small blind', `${smallBlindSeat.name} posts the small blind.`, 'engine', Math.min(15, smallBlindSeat.contribution)) : null,
+      bigBlindSeat ? makeEvent(handId, 'Preflop', bigBlindSeat.name, 'Big blind', `${bigBlindSeat.name} posts the big blind.`, 'engine', Math.min(30, bigBlindSeat.contribution)) : null,
+    ].filter((event): event is HandEvent => event !== null),
     stage: 'awaiting-action',
     winnerIds: [],
     potAwarded: 0,
-    message: 'Action starts preflop with Atlas under the gun.',
+    message: firstToAct ? `Action starts preflop with ${firstToAct.name} ${firstToAct.role === 'UTG' ? 'under the gun' : 'to act first'}.` : 'Hand is ready.',
   };
+}
+
+export function createNextHand(table: TableState): { table: TableState; hand: HandState } | null {
+  if (activeTableSeats(table).length < 2) return null;
+  const nextTable = { ...table, seats: table.seats.map((seat) => ({ ...seat })) };
+  return { table: nextTable, hand: createHand(nextTable) };
 }
 
 export function visibleBoard(state: HandState) {

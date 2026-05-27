@@ -7,10 +7,12 @@ import {
   Seat,
   Street,
   chooseBotAction,
-  createHand,
+  createInitialTable,
+  createNextHand,
   getLegalActions,
   potSize,
   submitAction,
+  syncTableFromHand,
   visibleBoard,
 } from './nlheEngine';
 import { trackHandHistoryEvent } from './handHistoryAnalytics';
@@ -190,7 +192,13 @@ function sourceForAnalytics(event: HandEvent) {
 }
 
 function App() {
-  const [state, setState] = useState(() => createHand(1));
+  const [tableState, setTableState] = useState(() => {
+    const table = createInitialTable();
+    const next = createNextHand(table);
+    if (!next) throw new Error('Unable to start table with fewer than two active players');
+    return next;
+  });
+  const state = tableState.hand;
   const [mode, setMode] = useState<TableMode>('play');
   const [selectedEvent, setSelectedEvent] = useState(0);
   const [historyVisible, setHistoryVisible] = useState(true);
@@ -224,10 +232,10 @@ function App() {
   useEffect(() => {
     if (!activeSeat || activeSeat.isHero || state.stage !== 'awaiting-action') return;
     const timer = window.setTimeout(() => {
-      setState((current) => {
-        if (current.currentSeatId !== activeSeat.id) return current;
-        const decision = chooseBotAction(current, activeSeat.id);
-        return submitAction(current, activeSeat.id, decision.kind, decision.targetContribution);
+      setTableState((current) => {
+        if (current.hand.currentSeatId !== activeSeat.id) return current;
+        const decision = chooseBotAction(current.hand, activeSeat.id);
+        return { ...current, hand: submitAction(current.hand, activeSeat.id, decision.kind, decision.targetContribution) };
       });
     }, 650);
     return () => window.clearTimeout(timer);
@@ -240,7 +248,10 @@ function App() {
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
     const timer = window.setTimeout(() => {
-      setState((current) => createHand(current.handNumber + 1));
+      setTableState((current) => {
+        const syncedTable = syncTableFromHand(current.table, current.hand);
+        return createNextHand(syncedTable) ?? current;
+      });
       setSelectedEvent(0);
       setMode('play');
       setCoachState('idle');
@@ -251,7 +262,7 @@ function App() {
 
   const runAction = (kind: ActionKind, targetContribution?: number) => {
     if (!isHeroTurn) return;
-    setState((current) => submitAction(current, hero.id, kind, targetContribution));
+    setTableState((current) => ({ ...current, hand: submitAction(current.hand, hero.id, kind, targetContribution) }));
     setMode('play');
   };
 
