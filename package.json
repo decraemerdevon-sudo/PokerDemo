@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:position": "tsx scripts/verify-position-rotation.ts"
   },
   "dependencies": {
     "react": "^19.2.3",
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "tsx": "^4.22.3",
     "typescript": "^5.9.3",
     "vite": "^7.2.6"
   }
