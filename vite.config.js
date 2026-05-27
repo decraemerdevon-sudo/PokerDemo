@@ -2,7 +2,6 @@ import path from 'node:path';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/PokerDemo/',
   cacheDir: 'node_modules/.vite',
   optimizeDeps: {
     include: ['react', 'react/jsx-dev-runtime', 'react-dom/client'],
