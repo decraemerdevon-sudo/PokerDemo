@@ -542,6 +542,7 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
 }
 
 type HandTier = 1 | 2 | 3 | 4 | 5;
+type HandKey = string;
 
 function randomFloat() {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -568,29 +569,165 @@ function canonicalHole(cards: Card[]) {
   const second = sorted[1];
   const suited = first.suit === second.suit;
   const pair = first.rank === second.rank;
+  const highRank = handRank(first.rank);
+  const lowRank = handRank(second.rank);
   return {
     high: first,
     low: second,
     suited,
     pair,
-    key: pair ? `${first.rank}${second.rank}` : `${first.rank}${second.rank}${suited ? 's' : 'o'}`,
+    key: pair ? `${highRank}${lowRank}` : `${highRank}${lowRank}${suited ? 's' : 'o'}`,
   };
 }
 
-function classifyPreflopHand(cards: Card[]): HandTier {
-  const { key, pair, high, low, suited } = canonicalHole(cards);
-  const highValue = rankValue(high.rank);
-  const lowValue = rankValue(low.rank);
-  const gap = highValue - lowValue;
+function handRank(rank: Rank) {
+  return rank === '10' ? 'T' : rank;
+}
 
-  if (['AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo'].includes(key)) return 1;
-  if (['TT', '99', 'AQs', 'AQo', 'AJs', 'KQs', 'ATs'].includes(key)) return 2;
-  if (['88', '77', '66', 'KJs', 'KTs', 'QJs', 'QTs', 'JTs', 'T9s', 'KQo', 'AJo', 'ATo'].includes(key)) return 3;
-  if (high.rank === 'A' && suited && lowValue >= 2 && lowValue <= 9) return 3;
-  if (['55', '44', '33', '22', '98s', '87s', '76s', '65s', '54s', 'KJo', 'QJo', 'K9s', 'Q9s', 'J9s'].includes(key)) return 4;
-  if (pair && highValue <= 5) return 4;
-  if (suited && gap === 1 && highValue <= 9 && lowValue >= 4) return 4;
-  return 5;
+const handRanks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+
+function expandRange(shorthand: string[]): Set<HandKey> {
+  const hands = new Set<HandKey>();
+  shorthand.forEach((token) => {
+    const trimmed = token.trim();
+    if (!trimmed) return;
+    if (trimmed.endsWith('+')) {
+      const base = trimmed.slice(0, -1);
+      const suitedness = base.endsWith('s') || base.endsWith('o') ? base.slice(-1) : '';
+      const ranksOnly = suitedness ? base.slice(0, -1) : base;
+      const [first, second] = ranksOnly;
+
+      if (first === second) {
+        const start = handRanks.indexOf(first);
+        for (let index = start; index >= 0; index -= 1) hands.add(`${handRanks[index]}${handRanks[index]}`);
+        return;
+      }
+
+      const start = handRanks.indexOf(second);
+      const stop = handRanks.indexOf(first);
+      for (let index = start; index > stop; index -= 1) hands.add(`${first}${handRanks[index]}${suitedness}`);
+      return;
+    }
+    hands.add(trimmed);
+  });
+  return hands;
+}
+
+function unionRanges(...ranges: Set<HandKey>[]) {
+  return new Set(ranges.flatMap((range) => [...range]));
+}
+
+const UTG_OPEN_RANGE = expandRange([
+  '55+', 'AKs', 'AQs', 'AJs', 'ATs', 'A9s', 'A8s', 'A7s', 'A6s', 'A5s', 'A4s', 'A3s', 'A2s',
+  'KQs', 'KJs', 'KTs', 'K9s', 'QJs', 'QTs', 'Q9s', 'JTs', 'J9s', 'T9s', 'T8s', '98s', '97s',
+  '87s', '86s', '76s', '75s', '65s', '64s', '54s', 'AKo', 'AQo', 'AJo', 'ATo', 'KQo', 'KJo', 'QJo',
+]);
+
+const UTG_PLUS_ONE_OPEN_RANGE = unionRanges(UTG_OPEN_RANGE, expandRange(['44', 'Q8s', 'J8s', 'T7s', '53s', 'KTo', 'QTo', 'JTo']));
+const MP_OPEN_RANGE = unionRanges(UTG_PLUS_ONE_OPEN_RANGE, expandRange(['22+', 'K8s', 'K7s', 'K6s', 'K5s', 'K4s', 'K3s', 'K2s', 'Q7s', 'J7s', 'T6s', '96s', '85s', '74s', '63s', '43s', 'T9o']));
+const HJ_OPEN_RANGE = unionRanges(MP_OPEN_RANGE, expandRange(['Q6s', 'Q5s', 'Q4s', 'Q3s', 'Q2s', 'J6s', 'J5s', 'J4s', 'T5s', 'T4s', '95s', '84s', '73s', '62s', '52s', '42s', 'K9o', 'Q9o', 'J9o', 'T8o', '98o']));
+const CO_OPEN_RANGE = unionRanges(HJ_OPEN_RANGE, expandRange(['J3s', 'J2s', 'T3s', 'T2s', '93s', '83s', '72s', 'K8o', 'K7o', 'Q8o', 'J8o', 'T7o', '97o', '87o']));
+const BTN_OPEN_RANGE = unionRanges(CO_OPEN_RANGE, expandRange(['92s', '82s', '32s', 'K6o', 'K5o', 'K4o', 'K3o', 'K2o', 'Q7o', 'Q6o', 'Q5o', 'Q4o', 'J7o', 'J6o', 'T6o', '96o', '86o', '76o', 'A9o', 'A8o', 'A7o', 'A6o', 'A5o', 'A4o', 'A3o', 'A2o']));
+const SB_OPEN_RANGE = new Set([...BTN_OPEN_RANGE].filter((hand) => !['K2o', 'K3o', 'K4o', 'Q4o', 'Q5o', 'J6o', 'T5o', 'T4o', 'T3o', 'T2o', '95o', '85o', '75o', '64o', '53o', '43o', '32o'].includes(hand)));
+
+const OPEN_RANGES: Record<SeatRole, Set<HandKey>> = {
+  UTG: UTG_OPEN_RANGE,
+  'UTG+1': UTG_PLUS_ONE_OPEN_RANGE,
+  MP: MP_OPEN_RANGE,
+  'MP+1': MP_OPEN_RANGE,
+  HJ: HJ_OPEN_RANGE,
+  CO: CO_OPEN_RANGE,
+  BTN: BTN_OPEN_RANGE,
+  SB: SB_OPEN_RANGE,
+  BB: new Set(),
+  'BTN/SB': BTN_OPEN_RANGE,
+};
+
+const BB_CALL_VS_BTN = expandRange([
+  '22+', 'AKs+', 'AQs+', 'AJs+', 'ATs+', 'A9s+', 'A8s+', 'A7s+', 'A6s+', 'A5s+', 'A4s+', 'A3s+', 'A2s+',
+  'KQs', 'KJs', 'KTs', 'K9s', 'K8s', 'K7s', 'K6s', 'K5s', 'K4s', 'K3s', 'K2s',
+  'QJs', 'QTs', 'Q9s', 'Q8s', 'Q7s', 'Q6s', 'Q5s', 'Q4s', 'Q3s',
+  'JTs', 'J9s', 'J8s', 'J7s', 'J6s', 'J5s', 'J4s',
+  'T9s', '98s', '87s', '76s', '65s', '54s', '43s', '32s',
+  'AJo', 'AQo', 'AKo', 'KQo', 'KJo', 'KTo', 'QJo', 'QTo', 'JTo', 'T9o', '98o', '87o', '76o', '65o', '54o',
+]);
+const BB_CALL_VS_CO = new Set([...BB_CALL_VS_BTN].filter((hand) => !['Q3s', 'J4s', '32s', '65o', '54o', 'K2s', 'K3s'].includes(hand)));
+const BB_CALL_RANGES: Record<string, Set<HandKey>> = {
+  BTN: BB_CALL_VS_BTN,
+  CO: BB_CALL_VS_CO,
+  HJ: unionRanges(MP_OPEN_RANGE, expandRange(['A9o', 'KTo', 'QTo', 'JTo', '98o', '87o', '76o', '65o', '54o'])),
+  MP: unionRanges(UTG_PLUS_ONE_OPEN_RANGE, expandRange(['22', '33', '44', 'KTo', 'QTo', 'JTo', 'T9o', '98o', '87o', '76o'])),
+  'MP+1': unionRanges(UTG_PLUS_ONE_OPEN_RANGE, expandRange(['22', '33', '44', 'KTo', 'QTo', 'JTo', 'T9o', '98o', '87o', '76o'])),
+  UTG: unionRanges(UTG_OPEN_RANGE, expandRange(['22', '33', '44', 'KTo', 'QTo', 'JTo', 'T9o', '98o'])),
+  'UTG+1': unionRanges(UTG_OPEN_RANGE, expandRange(['22', '33', '44', 'KTo', 'QTo', 'JTo', 'T9o', '98o'])),
+  SB: BB_CALL_VS_BTN,
+  'BTN/SB': BB_CALL_VS_BTN,
+};
+
+const BB_3BET_VALUE = expandRange(['TT+', 'AKs', 'AKo', 'AQs']);
+const BB_3BET_BLUFF = expandRange(['A5s', 'A4s', 'A3s', 'A2s', 'K5s', 'K4s', 'K3s', 'K2s', '76s', '65s', '54s']);
+const NON_BB_3BET_VALUE = expandRange(['JJ+', 'AKs', 'AKo']);
+const LATE_3BET_BLUFFS = expandRange(['A5s', 'A4s', 'A3s', 'A2s', '76s', '65s', '54s']);
+const IN_POSITION_CALL_RANGE = expandRange(['22+', 'AQs', 'AJs', 'ATs', 'A9s', 'KQs', 'KJs', 'KTs', 'QJs', 'QTs', 'JTs', 'T9s', '98s', '87s', '76s', '65s', '54s', '43s', 'J9s', 'T8s', '97s', '86s', '75s', '64s', 'AQo', 'AJo', 'ATo', 'KQo', 'KJo', 'QJo']);
+const OUT_OF_POSITION_CALL_RANGE = expandRange(['TT', '99', '88', 'AQs', 'AJs', 'KQs', 'AQo', '22', '33', '44', '55', '66', '77']);
+const THREE_BET_CONTINUE_RANGE = expandRange(['TT', '99', 'AQs']);
+
+function getCallRange(position: SeatRole, openerPosition: SeatRole | undefined) {
+  const openerIsEarlier = openerPosition ? positionOrder(openerPosition) < positionOrder(position) : true;
+  return openerIsEarlier ? IN_POSITION_CALL_RANGE : OUT_OF_POSITION_CALL_RANGE;
+}
+
+function positionOrder(role: SeatRole) {
+  const normalized = role === 'BTN/SB' ? 'BTN' : role;
+  return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO', 'BTN'].indexOf(normalized);
+}
+
+function countRaisesThisStreet(state: HandState) {
+  return state.events.filter((event) => event.street === state.street && (event.action === 'Raise' || event.action === 'Bet')).length;
+}
+
+function countLimpers(state: HandState) {
+  return state.seats.filter((candidate) => candidate.streetContribution === state.bigBlind && candidate.role !== 'BB' && candidate.lastAction.startsWith('Call')).length;
+}
+
+function openerPosition(state: HandState): SeatRole | undefined {
+  if (!state.lastAggressorId) return undefined;
+  return state.seats.find((candidate) => candidate.id === state.lastAggressorId)?.role;
+}
+
+function calcOpenSize(state: HandState, position: SeatRole) {
+  const baseSize = (position === 'SB' || position === 'BTN/SB' ? 3 : 2.5) * state.bigBlind;
+  return baseSize + countLimpers(state) * state.bigBlind;
+}
+
+function isPocketPair(hand: HandKey) {
+  return hand.length === 2 && hand[0] === hand[1];
+}
+
+function isSuitedConnectorHand(hand: HandKey) {
+  if (!hand.endsWith('s')) return false;
+  const high = handRanks.indexOf(hand[0]);
+  const low = handRanks.indexOf(hand[1]);
+  return low - high === 1;
+}
+
+function isPureSpeculative(hand: HandKey) {
+  return isPocketPair(hand) || hand.endsWith('s') || isSuitedConnectorHand(hand);
+}
+
+function preflopRangeAdvantage(state: HandState, seat: Seat): 'strong' | 'neutral' | 'wide' {
+  const opener = openerPosition(state);
+  if (!opener) return ['UTG', 'UTG+1', 'MP'].includes(seat.role) ? 'strong' : ['BTN', 'CO', 'BB'].includes(seat.role) ? 'wide' : 'neutral';
+  if (state.lastAggressorId === seat.id && positionOrder(opener) <= positionOrder('MP')) return 'strong';
+  if (seat.role === 'BB') return 'wide';
+  return 'neutral';
+}
+
+function textureFavorsPreflopAggressor(board: Card[]) {
+  const boardValues = board.map((card) => rankValue(card.rank));
+  const highCards = boardValues.filter((value) => value >= 10).length;
+  const paired = new Set(boardValues).size < boardValues.length;
+  return highCards >= 2 || (highCards >= 1 && paired);
 }
 
 function rankCounts(cards: Card[]) {
@@ -672,8 +809,10 @@ function classifyPostflopHand(holeCards: Card[], board: Card[], street: Street):
 }
 
 function positionCategory(role: SeatRole): 'early' | 'middle' | 'late' | 'blind' {
+  if (role === 'UTG' || role === 'UTG+1') return 'early';
+  if (role === 'MP' || role === 'MP+1' || role === 'HJ') return 'middle';
   if (role === 'CO') return 'middle';
-  if (role === 'BTN') return 'late';
+  if (role === 'BTN' || role === 'BTN/SB') return 'late';
   return 'blind';
 }
 
@@ -727,45 +866,64 @@ export function chooseBotAction(state: HandState, seatId: string): { kind: Actio
   const currentTableBet = currentBet(state);
 
   if (state.street === 'Preflop') {
-    const tier = classifyPreflopHand(seat.cards);
+    const hand = canonicalHole(seat.cards).key;
     const facingRaise = currentTableBet > state.bigBlind;
-    const potOdds = call ? call.amountToPutIn / Math.max(1, pot + call.amountToPutIn) : 0;
     const stackToPot = seat.stack / Math.max(1, pot);
     const position = seat.role;
     const callers = countCallers(state);
+    const raisesThisStreet = countRaisesThisStreet(state);
     const openAction = raise ?? bet;
 
     if (!facingRaise) {
-      if (openAction && (tier === 1 || tier === 2)) return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, 2.5 * state.bigBlind) };
-      if (openAction && tier === 3 && (['CO', 'BTN', 'HJ'].includes(position) || position === 'SB')) {
-        return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, (position === 'SB' ? 3 : 2.5) * state.bigBlind) };
-      }
-      if (openAction && tier === 4 && (position === 'BTN' || (['CO', 'HJ'].includes(position) && callers === 0))) {
-        return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, 2.5 * state.bigBlind) };
-      }
+      if (openAction && OPEN_RANGES[position].has(hand)) return { kind: openAction.kind, targetContribution: clampTotalTarget(openAction, calcOpenSize(state, position)) };
       if (check) return { kind: 'check' };
       return { kind: 'fold' };
     }
 
-    const facingThreeBet = currentTableBet >= state.bigBlind * 7.5;
+    const facingThreeBet = raisesThisStreet >= 2;
     if (facingThreeBet) {
-      if (raise && tier === 1) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 2.5 * currentTableBet) };
-      if (call && tier <= 2) return { kind: 'call' };
+      if (raise && ['AA', 'KK'].includes(hand)) return { kind: 'raise', targetContribution: raise.max };
+      if (['QQ', 'JJ', 'AKs', 'AKo'].includes(hand)) {
+        if (raise && randomFloat() < 0.5) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 2.5 * currentTableBet) };
+        if (call) return { kind: 'call' };
+      }
+      if (call && THREE_BET_CONTINUE_RANGE.has(hand)) return { kind: 'call' };
+      if (raise && ['A5s', 'A4s'].includes(hand) && randomFloat() < 0.3) return { kind: 'raise', targetContribution: raise.max };
       return { kind: 'fold' };
     }
 
-    if (raise && tier === 1) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
-    if (tier === 2) {
-      if (raise && ['BTN', 'CO'].includes(position)) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
+    const openPosition = openerPosition(state);
+    if (position === 'BB') {
+      const bbCallRange = BB_CALL_RANGES[openPosition ?? 'BTN'] ?? BB_CALL_VS_BTN;
+      if (raise && BB_3BET_VALUE.has(hand)) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
+      if (raise && BB_3BET_BLUFF.has(hand) && randomFloat() < 0.35) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 2.5 * currentTableBet) };
+      if (call && bbCallRange.has(hand)) return { kind: 'call' };
+      return { kind: 'fold' };
+    }
+
+    if (raise && NON_BB_3BET_VALUE.has(hand)) return { kind: 'raise', targetContribution: clampTotalTarget(raise, 3 * currentTableBet) };
+    if (raise && ['BTN', 'CO'].includes(position) && LATE_3BET_BLUFFS.has(hand) && randomFloat() < 0.4) {
+      return { kind: 'raise', targetContribution: clampTotalTarget(raise, 2.8 * currentTableBet) };
+    }
+
+    const callRange = getCallRange(position, openPosition);
+    if (call && callRange.has(hand)) {
+      if (callers >= 2 && isPureSpeculative(hand)) {
+        if (['22', '33', '44', '55'].includes(hand) || isSuitedConnectorHand(hand)) return { kind: 'call' };
+        return { kind: 'fold' };
+      }
+      if (callRange === OUT_OF_POSITION_CALL_RANGE && ['22', '33', '44', '55', '66', '77'].includes(hand) && stackToPot <= 20) {
+        return { kind: 'fold' };
+      }
       if (call) return { kind: 'call' };
     }
-    if (call && tier === 3 && potOdds < 0.25) return { kind: 'call' };
-    if (call && tier === 4 && hasSuitedConnector(seat.cards) && potOdds < 0.15 && stackToPot > 15) return { kind: 'call' };
     return { kind: 'fold' };
   }
 
   const board = visibleBoard(state);
-  const tier = classifyPostflopHand(seat.cards, board, state.street);
+  const rangeAdvantage = preflopRangeAdvantage(state, seat);
+  let tier = classifyPostflopHand(seat.cards, board, state.street);
+  if (rangeAdvantage === 'strong' && tier > 1 && board.length >= 3 && textureFavorsPreflopAggressor(board)) tier = (tier - 1) as HandTier;
   const ip = isInPosition(state, seat);
 
   if (!call) {
