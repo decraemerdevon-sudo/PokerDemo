@@ -254,6 +254,10 @@ dd {
   box-shadow: 0 0 0 3px rgba(244, 191, 69, 0.25);
 }
 
+.seat-folded {
+  opacity: 0.64;
+}
+
 .seat-topline {
   align-items: center;
   display: flex;
@@ -344,7 +348,7 @@ dd {
 .action-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .primary-action,
