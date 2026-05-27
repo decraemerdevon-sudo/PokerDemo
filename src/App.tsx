@@ -103,7 +103,6 @@ function App() {
   const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
-  const canStartNewHand = state.stage === 'hand-complete';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
 
   useEffect(() => {
@@ -136,14 +135,17 @@ function App() {
     setSelectedEvent((current) => Math.min(current, state.events.length - 1));
   }, [state.events.length]);
 
-  const reset = () => {
-    if (!canStartNewHand) return;
-    setState((current) => createHand(current.handNumber + 1));
-    setSelectedEvent(0);
-    setMode('play');
-    setCoachState('idle');
-    setCoachAdvice('');
-  };
+  useEffect(() => {
+    if (state.stage !== 'hand-complete') return;
+    const timer = window.setTimeout(() => {
+      setState((current) => createHand(current.handNumber + 1));
+      setSelectedEvent(0);
+      setMode('play');
+      setCoachState('idle');
+      setCoachAdvice('');
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [state.stage]);
 
   const runAction = (kind: ActionKind, targetContribution?: number) => {
     if (!isHeroTurn) return;
@@ -200,7 +202,7 @@ function App() {
                 <small>{isHeroTurn ? 'Legal' : 'Locked'}</small>
               </button>
             ))}
-            <button className="ghost-action" disabled={!canStartNewHand} onClick={reset} type="button">{canStartNewHand ? 'New Hand' : 'Hand in progress'}</button>
+            <span className="auto-hand-status" role="status">{state.stage === 'hand-complete' ? 'Next hand auto-starts' : 'Hand in progress'}</span>
           </div>
         </section>
       </section>
