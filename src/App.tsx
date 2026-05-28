@@ -519,7 +519,6 @@ function App() {
             {legalActions.map((action) => (
               <button className="primary-action" disabled={!isHeroTurn} key={action.kind} onClick={() => runAction(action.kind, action.targetContribution)} type="button">
                 <span>{action.label}</span>
-                <small>{isHeroTurn ? 'Legal' : 'Locked'}</small>
               </button>
             ))}
             <span className="auto-hand-status" role="status">{state.stage === 'hand-complete' ? 'Next hand auto-starts' : 'Hand in progress'}</span>
