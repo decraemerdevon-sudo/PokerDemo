@@ -3,6 +3,13 @@ export type SeatPoint = {
   y: number;
 };
 
+const SEAT_CENTER_MIN = 18;
+const SEAT_CENTER_MAX = 82;
+
+function clampSeatCenter(value: number) {
+  return Math.min(SEAT_CENTER_MAX, Math.max(SEAT_CENTER_MIN, value));
+}
+
 export function getSeatAngles(totalSeats: number): number[] {
   if (totalSeats === 3) return [180, 240, 60];
   const humanAngle = 180;
@@ -13,8 +20,8 @@ export function getSeatAngles(totalSeats: number): number[] {
 export function getSeatPosition(seatAngle: number, tableCenter: SeatPoint, radius: number): SeatPoint {
   const angleRad = seatAngle * (Math.PI / 180);
   return {
-    x: tableCenter.x - radius * Math.sin(angleRad),
-    y: tableCenter.y - radius * Math.cos(angleRad),
+    x: clampSeatCenter(tableCenter.x - radius * Math.sin(angleRad)),
+    y: clampSeatCenter(tableCenter.y - radius * Math.cos(angleRad)),
   };
 }
 
