@@ -7,7 +7,8 @@
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
     "preview": "vite preview",
-    "test:position": "tsx scripts/verify-position-rotation.ts"
+    "test:position": "tsx scripts/verify-position-rotation.ts",
+    "test:engine": "tsx scripts/verify-nlhe-engine.ts"
   },
   "dependencies": {
     "react": "^19.2.3",

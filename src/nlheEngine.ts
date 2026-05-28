@@ -73,6 +73,16 @@ export type HandEvent = {
   source: 'engine' | 'hero' | 'bot';
 };
 
+export type PotAward = {
+  label: string;
+  amount: number;
+  eligiblePlayerIds: string[];
+  winnerIds: string[];
+  payouts: Record<string, number>;
+  winnerHandDescription: string | null;
+  wentToShowdown: boolean;
+};
+
 export type HandState = {
   handId: string;
   handNumber: number;
@@ -92,6 +102,7 @@ export type HandState = {
   stage: EngineStage;
   winnerIds: string[];
   potAwarded: number;
+  potAwards: PotAward[];
   message: string;
 };
 
@@ -123,21 +134,32 @@ function makeEvent(
 }
 
 function randomIndex(maxExclusive: number) {
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const values = new Uint32Array(1);
-    crypto.getRandomValues(values);
-    return values[0] % maxExclusive;
+  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
+    throw new Error('Secure crypto RNG is required to shuffle the deck');
   }
-  return Math.floor(Math.random() * maxExclusive);
+  const values = new Uint32Array(1);
+  const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+  return values[0] % maxExclusive;
 }
 
-function buildDeck() {
-  const deck = suits.flatMap((suit) => ranks.map((rank) => ({ rank, suit })));
+export function createFreshDeck(): Card[] {
+  return suits.flatMap((suit) => ranks.map((rank) => ({ rank, suit })));
+}
+
+export function shuffleDeck(cards: Card[]): Card[] {
+  const deck = [...cards];
   for (let i = deck.length - 1; i > 0; i -= 1) {
     const j = randomIndex(i + 1);
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
   return deck;
+}
+
+function buildDeck() {
+  return shuffleDeck(createFreshDeck());
 }
 
 function draw(deck: Card[], count: number): [Card[], Card[]] {
@@ -340,6 +362,7 @@ export function createHand(tableOrHandNumber: TableState | number = createInitia
     stage: 'awaiting-action',
     winnerIds: [],
     potAwarded: 0,
+    potAwards: [],
     message: firstToAct ? `Action starts preflop with ${firstToAct.name} ${firstToAct.role === 'UTG' ? 'under the gun' : 'to act first'}.` : 'Hand is ready.',
   };
 }
@@ -510,19 +533,69 @@ export function evaluateBestHand(cards: Card[]): HandScore {
   return best;
 }
 
+function handDescription(score: HandScore) {
+  return ['High card', 'Pair', 'Two pair', 'Trips', 'Straight', 'Flush', 'Full house', 'Quads', 'Straight flush'][score[0]] ?? 'Best hand';
+}
+
+function distanceLeftOfButton(seatIndex: number, buttonSeatIndex: number, seatCount: number) {
+  const distance = (seatIndex - buttonSeatIndex + seatCount) % seatCount;
+  return distance === 0 ? seatCount : distance;
+}
+
 function awardHand(state: HandState, reason: string): HandState {
-  const contenders = activeSeats(state).filter((seat) => seat.status !== 'folded');
-  const bestScore = contenders.reduce<HandScore | null>((best, seat) => {
-    const score = evaluateBestHand([...seat.cards, ...state.board]);
-    return !best || compareScores(score, best) > 0 ? score : best;
-  }, null);
-  const winners = contenders.length === 1 ? contenders : contenders.filter((seat) => compareScores(evaluateBestHand([...seat.cards, ...state.board]), bestScore ?? [0]) === 0);
-  const pot = potSize(state);
-  const winnerIds = winners.map((winner) => winner.id);
-  // Side-pot/all-in splitting is intentionally deferred for this slice; all contributions are awarded as one main pot.
-  const share = winners.length ? Math.floor(pot / winners.length) : 0;
-  const seats = state.seats.map((seat) => winnerIds.includes(seat.id) ? { ...seat, stack: seat.stack + share, lastAction: `Won ${share}` } : seat);
-  const winnerNames = winners.map((winner) => winner.name).join(', ') || 'No winner';
+  const contributionTiers = Array.from(new Set(state.seats.map((seat) => seat.contribution).filter((amount) => amount > 0))).sort((a, b) => a - b);
+  const showdown = state.board.length === 5 && state.seats.filter((seat) => seat.status !== 'folded').length > 1;
+  const payouts = new Map<string, number>();
+  const awards: PotAward[] = [];
+  let previousTier = 0;
+
+  contributionTiers.forEach((tier) => {
+    const contributors = state.seats.filter((seat) => seat.contribution >= tier);
+    const amount = (tier - previousTier) * contributors.length;
+    previousTier = tier;
+    if (amount <= 0) return;
+
+    const eligible = contributors.filter((seat) => seat.status !== 'folded');
+    const bestScore = eligible.reduce<HandScore | null>((best, seat) => {
+      const score = evaluateBestHand([...seat.cards, ...state.board]);
+      return !best || compareScores(score, best) > 0 ? score : best;
+    }, null);
+    const winners = eligible.length === 1 ? eligible : eligible.filter((seat) => compareScores(evaluateBestHand([...seat.cards, ...state.board]), bestScore ?? [0]) === 0);
+    const orderedWinners = [...winners].sort((a, b) => {
+      const aDistance = distanceLeftOfButton(a.seatIndex, state.buttonSeatIndex, state.seats.length);
+      const bDistance = distanceLeftOfButton(b.seatIndex, state.buttonSeatIndex, state.seats.length);
+      return aDistance - bDistance;
+    });
+    const baseShare = orderedWinners.length ? Math.floor(amount / orderedWinners.length) : 0;
+    let remainder = orderedWinners.length ? amount % orderedWinners.length : 0;
+    const potPayouts: Record<string, number> = {};
+
+    orderedWinners.forEach((winner) => {
+      const oddChip = remainder > 0 ? 1 : 0;
+      const payout = baseShare + oddChip;
+      potPayouts[winner.id] = payout;
+      payouts.set(winner.id, (payouts.get(winner.id) ?? 0) + payout);
+      remainder -= oddChip;
+    });
+
+    awards.push({
+      label: awards.length === 0 ? 'Main pot' : `Side pot ${awards.length}`,
+      amount,
+      eligiblePlayerIds: eligible.map((seat) => seat.id),
+      winnerIds: orderedWinners.map((winner) => winner.id),
+      payouts: potPayouts,
+      winnerHandDescription: bestScore && showdown ? handDescription(bestScore) : null,
+      wentToShowdown: showdown,
+    });
+  });
+
+  const winnerIds = Array.from(new Set(awards.flatMap((award) => award.winnerIds)));
+  const pot = awards.reduce((sum, award) => sum + award.amount, 0);
+  const seats = state.seats.map((seat) => {
+    const payout = payouts.get(seat.id) ?? 0;
+    return payout > 0 ? { ...seat, stack: seat.stack + payout, lastAction: `Won ${payout}` } : seat;
+  });
+  const winnerNames = winnerIds.map((winnerId) => state.seats.find((seat) => seat.id === winnerId)?.name ?? winnerId).join(', ') || 'No winner';
 
   return {
     ...state,
@@ -532,6 +605,7 @@ function awardHand(state: HandState, reason: string): HandState {
     stage: 'hand-complete',
     winnerIds,
     potAwarded: pot,
+    potAwards: awards,
     events: [...state.events, makeEvent(state.handId, 'Showdown', 'Dealer', 'Award pot', `${reason} ${winnerNames} wins ${pot}.`, 'engine', pot, { actionType: 'award-pot', potBefore: pot, potAfter: 0 })],
     message: `${winnerNames} wins ${pot}.`,
   };
@@ -560,7 +634,14 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
   const seat = seatById(state, seatId);
   const potBefore = potSize(state);
   const stackBefore = seat.stack;
-  const target = kind === 'bet' || kind === 'raise' ? Math.max(selected.min ?? selected.targetContribution, targetContribution ?? selected.targetContribution) : selected.targetContribution;
+  if ((kind === 'bet' || kind === 'raise') && targetContribution !== undefined) {
+    const min = selected.min ?? selected.targetContribution;
+    const max = selected.max ?? selected.targetContribution;
+    if (targetContribution < min || targetContribution > max) {
+      return { ...state, message: `${kind} target ${targetContribution} is outside the legal range.` };
+    }
+  }
+  const target = kind === 'bet' || kind === 'raise' ? targetContribution ?? selected.targetContribution : selected.targetContribution;
   const amount = kind === 'fold' || kind === 'check' ? 0 : Math.min(seat.stack, Math.max(0, target - seat.streetContribution));
   const nextStreetContribution = seat.streetContribution + amount;
   const aggressive = kind === 'bet' || kind === 'raise';
