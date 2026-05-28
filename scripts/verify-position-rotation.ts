@@ -1,4 +1,4 @@
-import { createHand, createInitialTable, syncTableFromHand, type SeatRole, type TableState } from '../src/nlheEngine';
+import { createHand, createInitialTable, getSeatLabel, syncTableFromHand, type SeatRole, type TableState } from '../src/nlheEngine';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -59,5 +59,22 @@ const skipTable = createInitialTable([
 ]);
 const skipHand = createHand(skipTable);
 assert(skipHand.buttonSeatIndex === 0, 'button should skip zero-chip seats while advancing');
+
+const nineSeatIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const activeSeatIndices = [...nineSeatIndices];
+const expectedByButton = [
+  { button: 2, labels: { 2: 'BTN', 3: 'SB', 4: 'BB', 5: 'UTG', 6: 'UTG+1', 7: 'MP', 8: 'MP+1', 0: 'HJ', 1: 'CO' } },
+  { button: 3, labels: { 3: 'BTN', 4: 'SB', 5: 'BB', 6: 'UTG', 7: 'UTG+1', 8: 'MP', 0: 'MP+1', 1: 'HJ', 2: 'CO' } },
+  { button: 4, labels: { 4: 'BTN', 5: 'SB', 6: 'BB', 7: 'UTG', 8: 'UTG+1', 0: 'MP', 1: 'MP+1', 2: 'HJ', 3: 'CO' } },
+] as const;
+
+expectedByButton.forEach(({ button, labels }) => {
+  Object.entries(labels).forEach(([seatIndex, label]) => {
+    assert(
+      getSeatLabel(Number(seatIndex), button, activeSeatIndices) === label,
+      `button ${button}: expected seat ${seatIndex} to render ${label}, got ${getSeatLabel(Number(seatIndex), button, activeSeatIndices)}`,
+    );
+  });
+});
 
 console.log('position rotation verification passed');
