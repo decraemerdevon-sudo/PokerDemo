@@ -3,7 +3,7 @@ export type Rank = 'A' | 'K' | 'Q' | 'J' | '10' | '9' | '8' | '7' | '6' | '5' | 
 export type Street = 'Preflop' | 'Flop' | 'Turn' | 'River' | 'Showdown';
 export type SeatRole = 'BTN' | 'SB' | 'BB' | 'UTG' | 'UTG+1' | 'MP' | 'MP+1' | 'HJ' | 'CO' | 'BTN/SB';
 export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'out';
-export type ActionKind = 'fold' | 'check' | 'call' | 'bet' | 'raise';
+export type ActionKind = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all_in';
 export type EngineStage = 'awaiting-action' | 'hand-complete';
 export type BotStyle = 'loose-aggressive' | 'balanced' | 'pressure';
 
@@ -554,24 +554,26 @@ function settleAfterAction(state: HandState, actedSeatId: string): HandState {
 export function submitAction(state: HandState, seatId: string, kind: ActionKind, targetContribution?: number): HandState {
   if (state.currentSeatId !== seatId) return { ...state, message: `Action is not on ${seatId}.` };
   const legal = getLegalActions(state, seatId);
-  const selected = legal.find((action) => action.kind === kind);
+  const allInBaseKind = legal.find((action) => (action.kind === 'raise' || action.kind === 'bet') && action.max === targetContribution)?.kind;
+  const effectiveKind = kind === 'all_in' ? allInBaseKind : kind;
+  const selected = legal.find((action) => action.kind === effectiveKind);
   if (!selected) return { ...state, message: `${kind} is not legal right now.` };
 
   const seat = seatById(state, seatId);
   const potBefore = potSize(state);
   const stackBefore = seat.stack;
-  const target = kind === 'bet' || kind === 'raise' ? Math.max(selected.min ?? selected.targetContribution, targetContribution ?? selected.targetContribution) : selected.targetContribution;
-  const amount = kind === 'fold' || kind === 'check' ? 0 : Math.min(seat.stack, Math.max(0, target - seat.streetContribution));
+  const target = effectiveKind === 'bet' || effectiveKind === 'raise' ? Math.max(selected.min ?? selected.targetContribution, targetContribution ?? selected.targetContribution) : selected.targetContribution;
+  const amount = effectiveKind === 'fold' || effectiveKind === 'check' ? 0 : Math.min(seat.stack, Math.max(0, target - seat.streetContribution));
   const nextStreetContribution = seat.streetContribution + amount;
-  const aggressive = kind === 'bet' || kind === 'raise';
+  const aggressive = effectiveKind === 'bet' || effectiveKind === 'raise' || kind === 'all_in';
   const actor = seat.name;
-  const actionLabel = kind[0].toUpperCase() + kind.slice(1);
+  const actionLabel = kind === 'all_in' ? 'All-in' : effectiveKind![0].toUpperCase() + effectiveKind!.slice(1);
   const seats = state.seats.map((candidate) => candidate.id === seatId ? {
     ...candidate,
     stack: candidate.stack - amount,
     contribution: candidate.contribution + amount,
     streetContribution: nextStreetContribution,
-    status: kind === 'fold' ? 'folded' : candidate.stack - amount === 0 ? 'all-in' : candidate.status,
+    status: effectiveKind === 'fold' ? 'folded' : candidate.stack - amount === 0 ? 'all-in' : candidate.status,
     lastAction: amount ? `${actionLabel} ${amount}` : actionLabel,
   } : candidate);
 
@@ -581,16 +583,16 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
     actedThisRound: aggressive ? [seatId] : Array.from(new Set([...state.actedThisRound, seatId])),
     lastAggressorId: aggressive ? seatId : state.lastAggressorId,
     minRaise: aggressive ? Math.max(state.bigBlind, nextStreetContribution - currentBet(state)) : state.minRaise,
-    events: [...state.events, makeEvent(state.handId, state.street, actor, actionLabel, `${actor} ${kind}${amount ? `s ${amount}` : 's'}.`, seat.isHero ? 'hero' : 'bot', amount || undefined, {
+    events: [...state.events, makeEvent(state.handId, state.street, actor, actionLabel, `${actor} ${kind === 'all_in' ? 'moves all-in' : `${effectiveKind}${amount ? `s ${amount}` : 's'}`}.`, seat.isHero ? 'hero' : 'bot', amount || undefined, {
       playerId: seat.id,
       position: seat.role,
       actionType: kind,
       potBefore,
       potAfter: potBefore + amount,
       stackBefore,
-      betSizingPct: kind === 'fold' || kind === 'check' || potBefore <= 0 ? null : amount / potBefore,
+      betSizingPct: effectiveKind === 'fold' || effectiveKind === 'check' || potBefore <= 0 ? null : amount / potBefore,
     })],
-    message: `${actor} ${kind}${amount ? `s ${amount}` : 's'}.`,
+    message: kind === 'all_in' ? `${actor} moves all-in for ${amount}.` : `${actor} ${effectiveKind}${amount ? `s ${amount}` : 's'}.`,
   };
 
   return settleAfterAction(nextState, seatId);
