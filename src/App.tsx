@@ -48,6 +48,9 @@ type RecoveryNotice = {
   message: string;
 };
 
+const HERO_INITIAL_BUY_IN = 1500;
+const HIDDEN_REPLAY_ACTION_TYPES = new Set<HandEvent['actionType']>(['deal', 'small-blind', 'big-blind']);
+
 const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 1000, color: '#FFD700', borderColor: '#B8860B', label: '1K' },
   { value: 100, color: '#1a1a1a', borderColor: '#555555', label: '100' },
@@ -194,7 +197,7 @@ function SeatView({ seat, street, reveal, positionLabel, isButton, style }: { se
       </div>
       <dl className="seat-money">
         <div><dt>Stack</dt><dd>{formatMoney(seat.stack)}</dd></div>
-        <div><dt>In pot</dt><dd>{formatMoney(seat.contribution)}</dd></div>
+        <div><dt>In pot</dt><dd>{formatMoney(seat.streetContribution)}</dd></div>
       </dl>
     </article>
   );
@@ -215,6 +218,10 @@ function streetDividerLabel(event: HandEvent) {
   return `${event.street} - ${dealt}`;
 }
 
+function isUserFacingReplayEvent(event: HandEvent) {
+  return !HIDDEN_REPLAY_ACTION_TYPES.has(event.actionType);
+}
+
 function ActionFeed({ events, selectedEvent, onSelect, onKeyDown }: {
   events: HandEvent[];
   selectedEvent: number;
@@ -226,7 +233,9 @@ function ActionFeed({ events, selectedEvent, onSelect, onKeyDown }: {
 
   return (
     <div aria-label="Current hand action feed" className="timeline action-feed" onKeyDown={onKeyDown} role="listbox" tabIndex={0}>
-      {feedEvents.map(({ event, index }) => {
+      {feedEvents.length === 0 ? (
+        <p className="timeline-empty">Player decisions will appear here once action starts.</p>
+      ) : feedEvents.map(({ event, index }) => {
         const showStreetDivider = event.street !== previousStreet;
         previousStreet = event.street;
         return (
@@ -461,12 +470,14 @@ function App() {
     const max = customBetAction.max ?? hero.streetContribution + hero.stack;
     return { min, max };
   }, [customBetAction, hero.stack, hero.streetContribution, state.bigBlind]);
+  const replayEvents = useMemo(() => state.events.filter(isUserFacingReplayEvent), [state.events]);
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
   const coachAdvice = useMemo(() => buildCoachAdvice(state), [state]);
+  const heroSessionInvested = HERO_INITIAL_BUY_IN;
 
   useEffect(() => {
     const last = state.events[state.events.length - 1];
@@ -495,8 +506,8 @@ function App() {
   }, [activeSeat, state.stage]);
 
   useEffect(() => {
-    setSelectedEvent((current) => Math.min(current, state.events.length - 1));
-  }, [state.events.length]);
+    setSelectedEvent((current) => Math.max(0, Math.min(current, replayEvents.length - 1)));
+  }, [replayEvents.length]);
 
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
@@ -631,7 +642,8 @@ function App() {
 
   const handleTimelineKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!historyVisible) return;
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); setSelectedEvent((current) => Math.min(state.events.length - 1, current + 1)); }
+    if (replayEvents.length === 0) return;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); setSelectedEvent((current) => Math.min(replayEvents.length - 1, current + 1)); }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); setSelectedEvent((current) => Math.max(0, current - 1)); }
   };
 
@@ -684,6 +696,10 @@ function App() {
         <section className="action-panel" aria-labelledby="actions-title">
           <div><h2 id="actions-title">Legal Actions</h2><p aria-live="polite">{activeSeat?.isHero ? 'Action is on you.' : activeSeat ? `${activeSeat.name} is resolving a legal engine action.` : state.message}</p></div>
           <div className="betting-controls" ref={customBetRef}>
+            <dl className="session-investment" aria-label="Session investment">
+              <div><dt>Current hand pot</dt><dd>{formatMoney(pot)}</dd></div>
+              <div><dt>Your session invested</dt><dd>{formatMoney(heroSessionInvested)}</dd></div>
+            </dl>
             {customBet.isOpen && customBetLimits && (
               <div className="custom-bet-panel" role="dialog" aria-labelledby="custom-bet-title">
                 <div className="custom-bet-heading">
@@ -759,7 +775,7 @@ function App() {
           {historyVisible ? (
             <>
               <ActionFeed
-                events={state.events}
+                events={replayEvents}
                 onKeyDown={handleTimelineKey}
                 onSelect={(index) => { setSelectedEvent(index); setMode('review'); }}
                 selectedEvent={selectedEvent}

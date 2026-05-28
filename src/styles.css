@@ -600,6 +600,26 @@ dd {
   position: relative;
 }
 
+.session-investment {
+  background: #f4edde;
+  border: 1px solid #ded3c1;
+  border-radius: 8px;
+  color: #2f2b23;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 10px;
+}
+
+.session-investment div {
+  min-width: 0;
+}
+
+.session-investment dd {
+  overflow-wrap: anywhere;
+}
+
 .primary-action,
 .ghost-action,
 .auto-hand-status,
@@ -823,6 +843,16 @@ dd {
   gap: 4px;
   padding: 10px;
   text-align: left;
+}
+
+.timeline-empty {
+  background: #ede5d7;
+  border-radius: 8px;
+  color: #676151;
+  font-size: 0.88rem;
+  font-weight: 750;
+  margin: 0;
+  padding: 12px;
 }
 
 .action-feed {
@@ -1291,6 +1321,7 @@ dd {
   }
 
   .action-grid,
+  .session-investment,
   .rebuy-actions,
   .side-rail {
     grid-template-columns: 1fr;
