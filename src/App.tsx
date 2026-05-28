@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionKind,
   Card,
@@ -30,6 +30,12 @@ type ChipDenomination = {
 type ChipStack = {
   denomination: ChipDenomination;
   count: number;
+};
+type CustomBetState = {
+  isOpen: boolean;
+  value: number;
+  min: number;
+  max: number;
 };
 
 const CHIP_DENOMINATIONS: ChipDenomination[] = [
@@ -95,6 +101,10 @@ function cardText(cards: Card[]) {
 function signedMoney(value: number) {
   if (value === 0) return '$0';
   return `${value > 0 ? '+' : '-'}${formatMoney(Math.abs(value))}`;
+}
+
+function clampWholeChip(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function buildCoachAdvice(state: HandState) {
@@ -391,12 +401,23 @@ function App() {
   const [selectedHandId, setSelectedHandId] = useState<string | null>(() => loadSessionHistory()[0]?.handId ?? null);
   const [coachState, setCoachState] = useState<CoachState>('idle');
   const [coachAdvice, setCoachAdvice] = useState('');
+  const [customBet, setCustomBet] = useState<CustomBetState>({ isOpen: false, value: 0, min: 0, max: 0 });
+  const [customBetError, setCustomBetError] = useState('');
+  const [customBetFlash, setCustomBetFlash] = useState(false);
+  const customBetRef = useRef<HTMLDivElement | null>(null);
 
   const board = visibleBoard(state);
   const pot = potSize(state);
   const hero = state.seats.find((seat) => seat.isHero)!;
   const activeSeat = state.currentSeatId ? state.seats.find((seat) => seat.id === state.currentSeatId) : undefined;
   const legalActions = useMemo(() => getLegalActions(state, hero.id), [state, hero.id]);
+  const customBetAction = legalActions.find((action) => action.kind === 'raise') ?? legalActions.find((action) => action.kind === 'bet');
+  const customBetLimits = useMemo(() => {
+    if (!customBetAction) return null;
+    const min = customBetAction.min ?? (customBetAction.kind === 'bet' ? state.bigBlind : customBetAction.targetContribution);
+    const max = customBetAction.max ?? hero.streetContribution + hero.stack;
+    return { min, max };
+  }, [customBetAction, hero.stack, hero.streetContribution, state.bigBlind]);
   const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
@@ -454,10 +475,76 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [state.stage]);
 
+  useEffect(() => {
+    if (!customBet.isOpen || !customBetLimits) return;
+    setCustomBet((current) => ({
+      ...current,
+      min: customBetLimits.min,
+      max: customBetLimits.max,
+      value: clampWholeChip(current.value || customBetLimits.min, customBetLimits.min, customBetLimits.max),
+    }));
+  }, [customBet.isOpen, customBetLimits]);
+
+  useEffect(() => {
+    if (!customBet.isOpen) return;
+    const closeCustomBet = (event: MouseEvent) => {
+      if (customBetRef.current?.contains(event.target as Node)) return;
+      setCustomBet((current) => ({ ...current, isOpen: false }));
+      setCustomBetError('');
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setCustomBet((current) => ({ ...current, isOpen: false }));
+      setCustomBetError('');
+    };
+    document.addEventListener('mousedown', closeCustomBet);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeCustomBet);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [customBet.isOpen]);
+
   const runAction = (kind: ActionKind, targetContribution?: number) => {
     if (!isHeroTurn) return;
     setTableState((current) => ({ ...current, hand: submitAction(current.hand, hero.id, kind, targetContribution) }));
     setMode('play');
+    setCustomBet((current) => ({ ...current, isOpen: false }));
+    setCustomBetError('');
+  };
+
+  const toggleCustomBet = () => {
+    if (!customBetLimits) return;
+    setCustomBet((current) => ({
+      isOpen: !current.isOpen,
+      min: customBetLimits.min,
+      max: customBetLimits.max,
+      value: clampWholeChip(current.value || customBetLimits.min, customBetLimits.min, customBetLimits.max),
+    }));
+    setCustomBetError('');
+  };
+
+  const setCustomBetValue = (value: number) => {
+    setCustomBet((current) => ({ ...current, value: Math.round(value) }));
+    setCustomBetError('');
+  };
+
+  const applyQuickSize = (size: number) => {
+    if (!customBetLimits) return;
+    setCustomBetValue(clampWholeChip(size, customBetLimits.min, customBetLimits.max));
+  };
+
+  const confirmCustomBet = () => {
+    if (!customBetAction || !customBetLimits) return;
+    const value = Math.round(customBet.value);
+    if (value < customBetLimits.min) {
+      setCustomBetError(`Minimum bet is ${formatMoney(customBetLimits.min)}`);
+      setCustomBetFlash(true);
+      window.setTimeout(() => setCustomBetFlash(false), 240);
+      return;
+    }
+    const target = Math.min(value, customBetLimits.max);
+    runAction(target === customBetLimits.max ? 'all_in' : customBetAction.kind, target);
   };
 
   const askCoach = () => {
@@ -515,14 +602,62 @@ function App() {
         </div>
         <section className="action-panel" aria-labelledby="actions-title">
           <div><h2 id="actions-title">Legal Actions</h2><p aria-live="polite">{activeSeat?.isHero ? 'Action is on you.' : activeSeat ? `${activeSeat.name} is resolving a legal engine action.` : state.message}</p></div>
-          <div className="action-grid">
+          <div className="betting-controls" ref={customBetRef}>
+            {customBet.isOpen && customBetLimits && (
+              <div className="custom-bet-panel" role="dialog" aria-labelledby="custom-bet-title">
+                <div className="custom-bet-heading">
+                  <h3 id="custom-bet-title">Custom Bet</h3>
+                  <span>{formatMoney(customBetLimits.min)} - {formatMoney(customBetLimits.max)}</span>
+                </div>
+                <label className="custom-bet-input">
+                  <span className="sr-only">Custom bet amount</span>
+                  <input
+                    aria-describedby={customBetError ? 'custom-bet-error' : undefined}
+                    className={customBetFlash ? 'input-flash' : ''}
+                    inputMode="numeric"
+                    max={customBetLimits.max}
+                    min={customBetLimits.min}
+                    onChange={(event) => setCustomBetValue(Number(event.target.value))}
+                    type="number"
+                    value={Number.isNaN(customBet.value) ? '' : customBet.value}
+                  />
+                </label>
+                <input
+                  aria-label="Custom bet amount slider"
+                  className="custom-bet-slider"
+                  max={customBetLimits.max}
+                  min={customBetLimits.min}
+                  onChange={(event) => setCustomBetValue(Number(event.target.value))}
+                  step={1}
+                  type="range"
+                  value={clampWholeChip(customBet.value || customBetLimits.min, customBetLimits.min, customBetLimits.max)}
+                />
+                <div className="custom-bet-range"><span>Min: {formatMoney(customBetLimits.min)}</span><span>Max: {formatMoney(customBetLimits.max)}</span></div>
+                <div className="quick-sizes" aria-label="Quick bet sizes">
+                  <span>Quick sizes:</span>
+                  <button onClick={() => applyQuickSize(Math.floor(pot * 0.5))} type="button">1/2 Pot</button>
+                  <button onClick={() => applyQuickSize(pot)} type="button">Pot</button>
+                  <button onClick={() => applyQuickSize(pot * 2)} type="button">2x Pot</button>
+                </div>
+                {customBetError && <p className="custom-bet-error" id="custom-bet-error" role="alert">{customBetError}</p>}
+                <button className="confirm-bet" disabled={!isHeroTurn} onClick={confirmCustomBet} type="button">Confirm Bet</button>
+              </div>
+            )}
+            <div className="action-grid">
             {legalActions.map((action) => (
               <button className="primary-action" disabled={!isHeroTurn} key={action.kind} onClick={() => runAction(action.kind, action.targetContribution)} type="button">
                 <span>{action.label}</span>
                 <small>{isHeroTurn ? 'Legal' : 'Locked'}</small>
               </button>
             ))}
+              {customBetAction && (
+                <button aria-expanded={customBet.isOpen} className="primary-action custom-bet-toggle" disabled={!isHeroTurn} onClick={toggleCustomBet} type="button">
+                  <span>Custom Bet</span>
+                  <small>{customBet.isOpen ? 'Close' : 'Open'} v</small>
+                </button>
+              )}
             <span className="auto-hand-status" role="status">{state.stage === 'hand-complete' ? 'Next hand auto-starts' : 'Hand in progress'}</span>
+            </div>
           </div>
         </section>
       </section>
