@@ -62,6 +62,7 @@ button:disabled {
 
 .top-bar,
 .action-panel,
+.rebuy-panel,
 .coach-panel,
 .review-panel {
   background: #fffaf1;
@@ -504,6 +505,89 @@ dd {
   margin-bottom: 0;
 }
 
+.rebuy-panel {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(170px, 1fr) auto minmax(220px, 1.3fr);
+  margin-top: 14px;
+  padding: 16px;
+}
+
+.rebuy-panel h2 {
+  margin-bottom: 0;
+}
+
+.rebuy-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(80px, 1fr));
+  margin: 0;
+}
+
+.rebuy-summary div {
+  background: #eef5f2;
+  border: 1px solid #bfd3cc;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.rebuy-summary dt {
+  color: #676151;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.rebuy-summary dd {
+  color: #1f271f;
+  font-size: 1rem;
+  font-weight: 900;
+  margin: 3px 0 0;
+}
+
+.rebuy-notice {
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.rebuy-notice-info {
+  background: #eef5f2;
+  border: 1px solid #bfd3cc;
+  color: #1e4c45;
+}
+
+.rebuy-notice-warning {
+  background: #fff0ef;
+  border: 1px solid #d77870;
+  color: #7d1d17;
+}
+
+.rebuy-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rebuy-actions button {
+  font-weight: 900;
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.rebuy-primary {
+  background: #f4bf45;
+  color: #201c16;
+}
+
+.rebuy-secondary {
+  background: #274a67;
+  color: #fffaf1;
+}
+
 .action-grid {
   display: grid;
   gap: 10px;
@@ -702,6 +786,7 @@ dd {
 .coach-card {
   background: #eef5f2;
   border: 1px solid #bfd3cc;
+  overflow-wrap: anywhere;
 }
 
 .coach-card p {
@@ -778,6 +863,7 @@ dd {
   gap: 6px;
   grid-template-columns: 42px minmax(58px, 1fr) 58px 44px 34px;
   min-height: 44px;
+  overflow-wrap: anywhere;
 }
 
 .action-feed-item .action-position {
@@ -1145,7 +1231,8 @@ dd {
 
   .top-bar,
   .state-banner,
-  .action-panel {
+  .action-panel,
+  .rebuy-panel {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1198,11 +1285,13 @@ dd {
     align-self: stretch;
   }
 
-  .action-panel {
+  .action-panel,
+  .rebuy-panel {
     grid-template-columns: 1fr;
   }
 
   .action-grid,
+  .rebuy-actions,
   .side-rail {
     grid-template-columns: 1fr;
   }

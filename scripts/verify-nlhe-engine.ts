@@ -2,8 +2,11 @@ import {
   createFreshDeck,
   createHand,
   createInitialTable,
+  autoRecoverBotSeats,
   getLegalActions,
+  playableSeatCount,
   potSize,
+  rebuyBustedSeat,
   shuffleDeck,
   submitAction,
   type HandState,
@@ -172,5 +175,19 @@ const oddChipCompleted = submitAction(oddChipState, 'a', 'check');
 const mainPotPayouts = oddChipCompleted.potAwards[0].payouts;
 assert(mainPotPayouts.c === 152, `odd chip should go first left of button, expected C to receive 152 got ${mainPotPayouts.c}`);
 assert(mainPotPayouts.a === 151, `remaining tied winner should receive 151, got ${mainPotPayouts.a}`);
+
+const bustedTable = createInitialTable([
+  { seatIndex: 0, playerId: 'hero', name: 'Hero', chips: 1000, isActive: true, isHero: true },
+  { seatIndex: 1, playerId: 'bot', name: 'Bot', chips: 1000, isActive: true },
+]);
+const bustedHeroTable = { ...bustedTable, seats: bustedTable.seats.map((seat) => seat.isHero ? { ...seat, chips: 0, isActive: false } : seat) };
+const reloadedHeroTable = rebuyBustedSeat(bustedHeroTable, 'hero', 1500);
+assert(reloadedHeroTable.seats.find((seat) => seat.isHero)?.chips === 1500, 'rebuy should restore a busted hero to the configured buy-in');
+assert(reloadedHeroTable.seats.find((seat) => seat.isHero)?.isActive === true, 'rebuy should reactivate a busted hero');
+assert(playableSeatCount(reloadedHeroTable) === 2, 'rebuy should restore the table to two playable seats');
+
+const bustedBotTable = { ...bustedTable, seats: bustedTable.seats.map((seat) => !seat.isHero ? { ...seat, chips: 0, isActive: false } : seat) };
+const recoveredBotTable = autoRecoverBotSeats(bustedBotTable, 1200);
+assert(recoveredBotTable.seats.find((seat) => !seat.isHero)?.chips === 1200, 'bot recovery should reload busted training opponents');
 
 console.log('NLHE engine verification passed');
