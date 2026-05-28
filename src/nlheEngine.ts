@@ -6,6 +6,7 @@ export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'out';
 export type ActionKind = 'fold' | 'check' | 'call' | 'bet' | 'raise';
 export type EngineStage = 'awaiting-action' | 'hand-complete';
 export type BotStyle = 'loose-aggressive' | 'balanced' | 'pressure';
+export const DEFAULT_BUY_IN = 1500;
 
 export type Card = { rank: Rank; suit: Suit };
 export type Seat = {
@@ -111,8 +112,8 @@ const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
 const streetOrder: Street[] = ['Preflop', 'Flop', 'Turn', 'River'];
 
 const playerBlueprints: TableSeat[] = [
-  { seatIndex: 0, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
-  { seatIndex: 1, playerId: 'mira', name: 'Mira Bot', chips: 1500, isActive: true, style: 'loose-aggressive' },
+  { seatIndex: 0, playerId: 'hero', name: 'You', chips: DEFAULT_BUY_IN, isActive: true, isHero: true },
+  { seatIndex: 1, playerId: 'mira', name: 'Mira Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'loose-aggressive' },
   { seatIndex: 2, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
   { seatIndex: 3, playerId: 'atlas', name: 'Atlas Bot', chips: 1080, isActive: true, style: 'pressure' },
   { seatIndex: 4, playerId: 'river', name: 'River Bot', chips: 1320, isActive: true, style: 'balanced' },
@@ -175,6 +176,46 @@ function postBlind(seat: Seat, blind: number) {
 
 function activeTableSeats(table: TableState) {
   return table.seats.filter((seat) => seat.playerId !== null && seat.chips > 0 && seat.isActive);
+}
+
+export function playableSeatCount(table: TableState) {
+  return activeTableSeats(table).length;
+}
+
+export function addChipsToSeat(table: TableState, playerId: string, chips: number): TableState {
+  const amount = Math.max(0, Math.floor(chips));
+  if (amount <= 0) return table;
+  return {
+    ...table,
+    seats: table.seats.map((seat) => (
+      seat.playerId === playerId
+        ? { ...seat, chips: seat.chips + amount, isActive: true }
+        : seat
+    )),
+  };
+}
+
+export function rebuyBustedSeat(table: TableState, playerId: string, buyIn = DEFAULT_BUY_IN): TableState {
+  const amount = Math.max(0, Math.floor(buyIn));
+  return {
+    ...table,
+    seats: table.seats.map((seat) => (
+      seat.playerId === playerId && seat.chips <= 0
+        ? { ...seat, chips: amount, isActive: true }
+        : seat
+    )),
+  };
+}
+
+export function autoRecoverBotSeats(table: TableState, buyIn = DEFAULT_BUY_IN): TableState {
+  return {
+    ...table,
+    seats: table.seats.map((seat) => (
+      seat.playerId !== null && !seat.isHero && seat.chips <= 0
+        ? { ...seat, chips: buyIn, isActive: true }
+        : seat
+    )),
+  };
 }
 
 export function createInitialTable(seats: TableSeat[] = playerBlueprints): TableState {
