@@ -199,18 +199,29 @@ function rotateSoFirstIsAfter(activeSeatIndices: number[], buttonSeatIndex: numb
   return [...activeSeatIndices.slice(buttonPosition + 1), ...activeSeatIndices.slice(0, buttonPosition + 1)];
 }
 
-export function buildPositionLabels(numActive: number): SeatRole[] {
-  switch (numActive) {
-    case 2: return ['BB', 'BTN/SB'];
-    case 3: return ['SB', 'BB', 'BTN'];
-    case 4: return ['SB', 'BB', 'CO', 'BTN'];
-    case 5: return ['SB', 'BB', 'UTG', 'CO', 'BTN'];
-    case 6: return ['SB', 'BB', 'UTG', 'MP', 'CO', 'BTN'];
-    case 7: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'CO', 'BTN'];
-    case 8: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'HJ', 'CO', 'BTN'];
-    case 9: return ['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO', 'BTN'];
-    default: return (['SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO', 'BTN'] as SeatRole[]).slice(0, numActive);
-  }
+export function getPositionLabel(distanceFromButton: number, numActive: number): SeatRole {
+  if (numActive === 2) return distanceFromButton === 0 ? 'BTN/SB' : 'BB';
+  const labels: SeatRole[] = numActive >= 9
+    ? ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'MP', 'MP+1', 'HJ', 'CO']
+    : numActive === 8
+      ? ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'MP', 'HJ', 'CO']
+      : numActive === 7
+        ? ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'MP', 'CO']
+        : numActive === 6
+          ? ['BTN', 'SB', 'BB', 'UTG', 'MP', 'CO']
+          : numActive === 5
+            ? ['BTN', 'SB', 'BB', 'UTG', 'CO']
+            : ['BTN', 'SB', 'BB', 'UTG'];
+  return labels[distanceFromButton] ?? 'UTG';
+}
+
+export function getSeatLabel(seatIndex: number, buttonSeatIndex: number, activeSeatIndices: number[]): SeatRole | '' {
+  const sortedActiveSeatIndices = [...activeSeatIndices].sort((a, b) => a - b);
+  const buttonPosInActive = sortedActiveSeatIndices.indexOf(buttonSeatIndex);
+  const thisPosInActive = sortedActiveSeatIndices.indexOf(seatIndex);
+  if (buttonPosInActive === -1 || thisPosInActive === -1) return '';
+  const distanceFromButton = (thisPosInActive - buttonPosInActive + sortedActiveSeatIndices.length) % sortedActiveSeatIndices.length;
+  return getPositionLabel(distanceFromButton, sortedActiveSeatIndices.length);
 }
 
 export function assignBlindsAndPositions(table: TableState): PositionMap {
@@ -223,19 +234,19 @@ export function assignBlindsAndPositions(table: TableState): PositionMap {
   if (numActive === 2) {
     return {
       positions: {
-        BTN: orderedFromButton[1],
-        SB: orderedFromButton[1],
+        BTN: table.buttonSeatIndex,
+        SB: table.buttonSeatIndex,
         BB: orderedFromButton[0],
-        UTG: orderedFromButton[1],
+        UTG: table.buttonSeatIndex,
       },
-      preflopActionOrder: [orderedFromButton[1], orderedFromButton[0]],
+      preflopActionOrder: [table.buttonSeatIndex, orderedFromButton[0]],
       postflopActionOrder: [orderedFromButton[0], orderedFromButton[1]],
     };
   }
 
-  const labels = buildPositionLabels(numActive);
-  const positions = orderedFromButton.reduce<Partial<Record<SeatRole, number>>>((acc, seatIndex, index) => {
-    acc[labels[index]] = seatIndex;
+  const positions = activeSeatIndices.reduce<Partial<Record<SeatRole, number>>>((acc, seatIndex) => {
+    const label = getSeatLabel(seatIndex, table.buttonSeatIndex, activeSeatIndices);
+    if (label) acc[label] = seatIndex;
     return acc;
   }, {});
 

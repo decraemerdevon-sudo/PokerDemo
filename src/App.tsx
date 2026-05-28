@@ -9,6 +9,7 @@ import {
   chooseBotAction,
   createInitialTable,
   createNextHand,
+  getSeatLabel,
   getLegalActions,
   potSize,
   submitAction,
@@ -160,12 +161,18 @@ function ChipStacksView({ amount, label, size = 'player' }: { amount: number; la
   );
 }
 
-function SeatView({ seat, street, reveal }: { seat: Seat; street: Street; reveal: boolean }) {
+function SeatView({ seat, street, reveal, positionLabel, isButton }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
   return (
     <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`}>
       <div>
-        <div className="seat-topline"><strong>{seat.name}</strong><span>{seat.role}</span></div>
+        <div className="seat-topline">
+          <strong>{seat.name}</strong>
+          <span className="seat-position-group">
+            {positionLabel && <span className="seat-position-label">{positionLabel}</span>}
+            {isButton && <span className="dealer-chip" aria-label="dealer button">D</span>}
+          </span>
+        </div>
         <p>{seat.status === 'folded' ? 'Folded' : seat.status === 'all-in' ? 'All-in' : seat.lastAction}</p>
       </div>
       <div className="seat-cards" aria-label={`${seat.name} cards`}>
@@ -176,6 +183,56 @@ function SeatView({ seat, street, reveal }: { seat: Seat; street: Street; reveal
         <div><dt>In pot</dt><dd>{formatMoney(seat.contribution)}</dd></div>
       </dl>
     </article>
+  );
+}
+
+function formatEventAmount(event: HandEvent) {
+  return event.amount ? formatMoney(event.amount) : '';
+}
+
+function eventTimeLabel(events: HandEvent[], index: number) {
+  const newerCount = events.length - index - 1;
+  return newerCount === 0 ? 'now' : `${newerCount} ago`;
+}
+
+function streetDividerLabel(event: HandEvent) {
+  if (event.action !== 'Deal street') return event.street;
+  const dealt = event.note.replace(/^Burned one and dealt /, '').replace(/\. Betting round.*$/, '');
+  return `${event.street} - ${dealt}`;
+}
+
+function ActionFeed({ events, selectedEvent, onSelect, onKeyDown }: {
+  events: HandEvent[];
+  selectedEvent: number;
+  onSelect: (index: number) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+}) {
+  const feedEvents = events.map((event, index) => ({ event, index })).reverse();
+  let previousStreet: Street | null = null;
+
+  return (
+    <div aria-label="Current hand action feed" className="timeline action-feed" onKeyDown={onKeyDown} role="listbox" tabIndex={0}>
+      {feedEvents.map(({ event, index }) => {
+        const showStreetDivider = event.street !== previousStreet;
+        previousStreet = event.street;
+        return (
+          <div className="action-feed-group" key={event.id}>
+            {showStreetDivider && (
+              <div className="street-divider" aria-label={`${event.street} street`}>
+                <span>{streetDividerLabel(event)}</span>
+              </div>
+            )}
+            <button aria-selected={selectedEvent === index} className={selectedEvent === index ? 'timeline-item action-feed-item active' : 'timeline-item action-feed-item'} onClick={() => onSelect(index)} role="option" type="button">
+              <span className="action-position">{event.position ?? ''}</span>
+              <strong>{event.actor}</strong>
+              <span>{event.action}</span>
+              <span>{formatEventAmount(event)}</span>
+              <time>{eventTimeLabel(events, index)}</time>
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -342,6 +399,7 @@ function App() {
   const legalActions = useMemo(() => getLegalActions(state, hero.id), [state, hero.id]);
   const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
+  const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
@@ -443,7 +501,16 @@ function App() {
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
-            <div className="seats-grid">{state.seats.map((seat) => <SeatView key={seat.id} seat={seat} street={state.street} reveal={seat.isHero || showAllCards} />)}</div>
+            <div className="seats-grid">{state.seats.map((seat) => (
+              <SeatView
+                isButton={seat.seatIndex === state.buttonSeatIndex}
+                key={seat.id}
+                positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
+                reveal={seat.isHero || showAllCards}
+                seat={seat}
+                street={state.street}
+              />
+            ))}</div>
           </div>
         </div>
         <section className="action-panel" aria-labelledby="actions-title">
@@ -472,13 +539,12 @@ function App() {
           <div className="panel-heading"><div><p className="eyebrow">Replay</p><h2 id="review-title">Hand Timeline</h2></div><button onClick={() => setHistoryVisible((visible) => !visible)} type="button">{historyVisible ? 'Hide' : 'Show'}</button></div>
           {historyVisible ? (
             <>
-              <div aria-label="Hand timeline" className="timeline" onKeyDown={handleTimelineKey} role="listbox" tabIndex={0}>
-                {state.events.map((event, index) => (
-                  <button aria-selected={selectedEvent === index} className={selectedEvent === index ? 'timeline-item active' : 'timeline-item'} key={event.id} onClick={() => { setSelectedEvent(index); setMode('review'); }} role="option" type="button">
-                    <span>{event.street}</span><strong>{event.actor}: {event.action}{event.amount ? ` ${formatMoney(event.amount)}` : ''}</strong>
-                  </button>
-                ))}
-              </div>
+              <ActionFeed
+                events={state.events}
+                onKeyDown={handleTimelineKey}
+                onSelect={(index) => { setSelectedEvent(index); setMode('review'); }}
+                selectedEvent={selectedEvent}
+              />
               <article className="review-detail"><h3>{activeEvent.action} review</h3><p>{activeEvent.note}</p></article>
             </>
           ) : <div className="empty-state"><strong>Empty history</strong><p>No hand events are selected for review.</p></div>}

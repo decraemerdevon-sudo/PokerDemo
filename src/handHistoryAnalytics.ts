@@ -15,7 +15,7 @@ type TrackInput = Omit<HandHistoryAnalyticsEvent, 'id' | 'handId' | 'occurredAt'
   occurredAt?: string;
 };
 
-const ANALYTICS_ENDPOINT = '/api/hand-history';
+const ANALYTICS_ENDPOINT = '';
 
 function getSessionId() {
   const storageKey = 'poker-demo-session-id';
@@ -38,6 +38,8 @@ function createEvent(input: TrackInput): HandHistoryAnalyticsEvent {
 
 export function trackHandHistoryEvent(input: TrackInput) {
   const event = createEvent(input);
+  if (!ANALYTICS_ENDPOINT) return event;
+
   const payload = {
     sessionId: getSessionId(),
     handId: event.handId,
