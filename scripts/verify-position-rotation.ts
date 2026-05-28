@@ -1,4 +1,5 @@
 import { createHand, createInitialTable, getSeatLabel, syncTableFromHand, type SeatRole, type TableState } from '../src/nlheEngine';
+import { getSeatAngles, getSeatPosition } from '../src/seatGeometry';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -78,3 +79,30 @@ expectedByButton.forEach(({ button, labels }) => {
 });
 
 console.log('position rotation verification passed');
+
+const expectedGeometry = {
+  2: ['bottom', 'top'],
+  3: ['bottom', 'bottom-right', 'top-left'],
+  4: ['bottom', 'right', 'top', 'left'],
+  6: ['bottom', 'bottom-right', 'top-right', 'top', 'top-left', 'bottom-left'],
+} as const;
+
+function regionForPoint(point: { x: number; y: number }) {
+  const horizontal = point.x < 40 ? 'left' : point.x > 60 ? 'right' : '';
+  const vertical = point.y < 40 ? 'top' : point.y > 60 ? 'bottom' : '';
+  return [vertical, horizontal].filter(Boolean).join('-');
+}
+
+Object.entries(expectedGeometry).forEach(([seatCountText, expectedRegions]) => {
+  const seatCount = Number(seatCountText);
+  const regions = getSeatAngles(seatCount).map((angle) => regionForPoint(getSeatPosition(angle, { x: 50, y: 50 }, 45)));
+  assert(
+    regions.join('|') === expectedRegions.join('|'),
+    `${seatCount} seats: expected clockwise geometry ${expectedRegions.join(' -> ')}, got ${regions.join(' -> ')}`,
+  );
+});
+
+const fourSeatLabels = [0, 1, 2, 3].map((seatIndex) => getSeatLabel(seatIndex, 0, [0, 1, 2, 3]));
+assert(fourSeatLabels.join('|') === 'BTN|SB|BB|UTG', `4 seats: expected BTN -> SB -> BB -> UTG, got ${fourSeatLabels.join(' -> ')}`);
+
+console.log('seat geometry verification passed');

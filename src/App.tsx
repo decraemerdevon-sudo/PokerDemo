@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import {
   ActionKind,
   Card,
@@ -16,6 +16,7 @@ import {
   syncTableFromHand,
   visibleBoard,
 } from './nlheEngine';
+import { getSeatPosition, seatAngleForIndex } from './seatGeometry';
 import { trackHandHistoryEvent } from './handHistoryAnalytics';
 import { appendCompletedHand, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
@@ -39,8 +40,6 @@ const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 5, color: '#CC0000', borderColor: '#8B0000', label: '5' },
   { value: 1, color: '#F5F5F5', borderColor: '#AAAAAA', label: '1' },
 ];
-const fourSeatAngles = [315, 45, 225, 135];
-
 const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 const suitSymbols: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
 
@@ -67,16 +66,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
   const chipOffset = seatRadius * 0.38;
-  const angleRad = (seatAngle - 90) * (Math.PI / 180);
-  return {
-    x: tableCenter.x + (seatRadius - chipOffset) * Math.cos(angleRad),
-    y: tableCenter.y + (seatRadius - chipOffset) * Math.sin(angleRad),
-  };
-}
-
-function seatAngleForIndex(index: number, seatCount: number) {
-  if (seatCount === 4) return fourSeatAngles[index] ?? 0;
-  return (index * 360) / Math.max(seatCount, 1);
+  return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
 function texture(cards: Card[]) {
@@ -161,10 +151,10 @@ function ChipStacksView({ amount, label, size = 'player' }: { amount: number; la
   );
 }
 
-function SeatView({ seat, street, reveal, positionLabel, isButton }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean }) {
+function SeatView({ seat, street, reveal, positionLabel, isButton, style }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean; style?: CSSProperties }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
   return (
-    <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`}>
+    <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`} style={style}>
       <div>
         <div className="seat-topline">
           <strong>{seat.name}</strong>
@@ -495,22 +485,26 @@ function App() {
             <div className="pot-chip-area">
               <ChipStacksView amount={pot} label="Pot" size="pot" />
             </div>
-            {state.seats.map((seat, index) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(index, state.seats.length)} />)}
+            {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, state.seats.length)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
-            <div className="seats-grid">{state.seats.map((seat) => (
-              <SeatView
-                isButton={seat.seatIndex === state.buttonSeatIndex}
-                key={seat.id}
-                positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
-                reveal={seat.isHero || showAllCards}
-                seat={seat}
-                street={state.street}
-              />
-            ))}</div>
+            <div className="seats-grid">{state.seats.map((seat) => {
+              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, state.seats.length), { x: 50, y: 50 }, 45);
+              return (
+                <SeatView
+                  isButton={seat.seatIndex === state.buttonSeatIndex}
+                  key={seat.id}
+                  positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
+                  reveal={seat.isHero || showAllCards}
+                  seat={seat}
+                  street={state.street}
+                  style={{ left: `${position.x}%`, top: `${position.y}%` }}
+                />
+              );
+            })}</div>
           </div>
         </div>
         <section className="action-panel" aria-labelledby="actions-title">

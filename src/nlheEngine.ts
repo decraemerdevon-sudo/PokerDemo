@@ -100,10 +100,10 @@ const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
 const streetOrder: Street[] = ['Preflop', 'Flop', 'Turn', 'River'];
 
 const playerBlueprints: TableSeat[] = [
-  { seatIndex: 0, playerId: 'mira', name: 'Mira', chips: 1500, isActive: true, style: 'loose-aggressive' },
-  { seatIndex: 1, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
-  { seatIndex: 2, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
-  { seatIndex: 3, playerId: 'atlas', name: 'Atlas', chips: 1080, isActive: true, style: 'pressure' },
+  { seatIndex: 0, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
+  { seatIndex: 1, playerId: 'atlas', name: 'Atlas', chips: 1080, isActive: true, style: 'pressure' },
+  { seatIndex: 2, playerId: 'mira', name: 'Mira', chips: 1500, isActive: true, style: 'loose-aggressive' },
+  { seatIndex: 3, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
 ];
 
 let eventCounter = 0;
