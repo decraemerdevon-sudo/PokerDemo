@@ -573,7 +573,7 @@ function App() {
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
-              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, state.seats.length), { x: 50, y: 50 }, 45);
+              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, state.seats.length), { x: 50, y: 50 }, 32);
               return (
                 <SeatView
                   isButton={seat.seatIndex === state.buttonSeatIndex}
