@@ -14,6 +14,7 @@ export type Seat = {
   name: string;
   role: SeatRole;
   stack: number;
+  stackAtHandStart: number;
   contribution: number;
   streetContribution: number;
   status: PlayerStatus;
@@ -61,6 +62,13 @@ export type HandEvent = {
   actor: string;
   action: string;
   amount?: number;
+  playerId?: string;
+  position?: SeatRole;
+  actionType?: ActionKind | 'small-blind' | 'big-blind' | 'award-pot' | 'deal';
+  potBefore?: number;
+  potAfter?: number;
+  stackBefore?: number;
+  betSizingPct?: number | null;
   note: string;
   source: 'engine' | 'hero' | 'bot';
 };
@@ -100,9 +108,18 @@ const playerBlueprints: TableSeat[] = [
 
 let eventCounter = 0;
 
-function makeEvent(handId: string, street: Street, actor: string, action: string, note: string, source: HandEvent['source'], amount?: number): HandEvent {
+function makeEvent(
+  handId: string,
+  street: Street,
+  actor: string,
+  action: string,
+  note: string,
+  source: HandEvent['source'],
+  amount?: number,
+  metadata: Partial<HandEvent> = {},
+): HandEvent {
   eventCounter += 1;
-  return { id: `${handId}-${eventCounter}`, handId, street, actor, action, amount, note, source };
+  return { id: `${handId}-${eventCounter}`, handId, street, actor, action, amount, note, source, ...metadata };
 }
 
 function randomIndex(maxExclusive: number) {
@@ -251,6 +268,7 @@ export function createHand(tableOrHandNumber: TableState | number = createInitia
       name: tableSeat.name,
       role: roleForSeat(tableSeat.seatIndex, positionMap.positions),
       stack: tableSeat.chips,
+      stackAtHandStart: tableSeat.chips,
       contribution: 0,
       streetContribution: 0,
       status: 'active' as PlayerStatus,
@@ -288,9 +306,25 @@ export function createHand(tableOrHandNumber: TableState | number = createInitia
     actedThisRound: [],
     minRaise: 30,
     events: [
-      makeEvent(handId, 'Preflop', 'Dealer', 'Deal', 'New NLHE hand dealt.', 'engine'),
-      smallBlindSeat ? makeEvent(handId, 'Preflop', smallBlindSeat.name, 'Small blind', `${smallBlindSeat.name} posts the small blind.`, 'engine', Math.min(15, smallBlindSeat.contribution)) : null,
-      bigBlindSeat ? makeEvent(handId, 'Preflop', bigBlindSeat.name, 'Big blind', `${bigBlindSeat.name} posts the big blind.`, 'engine', Math.min(30, bigBlindSeat.contribution)) : null,
+      makeEvent(handId, 'Preflop', 'Dealer', 'Deal', 'New NLHE hand dealt.', 'engine', undefined, { actionType: 'deal' }),
+      smallBlindSeat ? makeEvent(handId, 'Preflop', smallBlindSeat.name, 'Small blind', `${smallBlindSeat.name} posts the small blind.`, 'engine', Math.min(15, smallBlindSeat.contribution), {
+        playerId: smallBlindSeat.id,
+        position: smallBlindSeat.role,
+        actionType: 'small-blind',
+        potBefore: 0,
+        potAfter: smallBlindSeat.contribution,
+        stackBefore: smallBlindSeat.stackAtHandStart,
+        betSizingPct: null,
+      }) : null,
+      bigBlindSeat ? makeEvent(handId, 'Preflop', bigBlindSeat.name, 'Big blind', `${bigBlindSeat.name} posts the big blind.`, 'engine', Math.min(30, bigBlindSeat.contribution), {
+        playerId: bigBlindSeat.id,
+        position: bigBlindSeat.role,
+        actionType: 'big-blind',
+        potBefore: smallBlindSeat?.contribution ?? 0,
+        potAfter: (smallBlindSeat?.contribution ?? 0) + bigBlindSeat.contribution,
+        stackBefore: bigBlindSeat.stackAtHandStart,
+        betSizingPct: null,
+      }) : null,
     ].filter((event): event is HandEvent => event !== null),
     stage: 'awaiting-action',
     winnerIds: [],
@@ -397,7 +431,7 @@ function resetForStreet(state: HandState, street: Street): HandState {
     actedThisRound: [],
     minRaise: state.bigBlind,
     seats: state.seats.map((seat) => ({ ...seat, streetContribution: 0, lastAction: seat.status === 'folded' ? 'Folded' : `Waiting on ${street}` })),
-    events: [...state.events, makeEvent(state.handId, street, 'Dealer', 'Deal street', `Burned one and dealt ${street}. Betting round starts from the small blind side.`, 'engine')],
+    events: [...state.events, makeEvent(state.handId, street, 'Dealer', 'Deal street', `Burned one and dealt ${street}. Betting round starts from the small blind side.`, 'engine', undefined, { actionType: 'deal' })],
     message: `${street} dealt. ${firstToAct ? seatById(state, firstToAct).name : 'No player'} acts first.`,
   };
 }
@@ -487,7 +521,7 @@ function awardHand(state: HandState, reason: string): HandState {
     stage: 'hand-complete',
     winnerIds,
     potAwarded: pot,
-    events: [...state.events, makeEvent(state.handId, 'Showdown', 'Dealer', 'Award pot', `${reason} ${winnerNames} wins ${pot}.`, 'engine', pot)],
+    events: [...state.events, makeEvent(state.handId, 'Showdown', 'Dealer', 'Award pot', `${reason} ${winnerNames} wins ${pot}.`, 'engine', pot, { actionType: 'award-pot', potBefore: pot, potAfter: 0 })],
     message: `${winnerNames} wins ${pot}.`,
   };
 }
@@ -513,6 +547,8 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
   if (!selected) return { ...state, message: `${kind} is not legal right now.` };
 
   const seat = seatById(state, seatId);
+  const potBefore = potSize(state);
+  const stackBefore = seat.stack;
   const target = kind === 'bet' || kind === 'raise' ? Math.max(selected.min ?? selected.targetContribution, targetContribution ?? selected.targetContribution) : selected.targetContribution;
   const amount = kind === 'fold' || kind === 'check' ? 0 : Math.min(seat.stack, Math.max(0, target - seat.streetContribution));
   const nextStreetContribution = seat.streetContribution + amount;
@@ -534,7 +570,15 @@ export function submitAction(state: HandState, seatId: string, kind: ActionKind,
     actedThisRound: aggressive ? [seatId] : Array.from(new Set([...state.actedThisRound, seatId])),
     lastAggressorId: aggressive ? seatId : state.lastAggressorId,
     minRaise: aggressive ? Math.max(state.bigBlind, nextStreetContribution - currentBet(state)) : state.minRaise,
-    events: [...state.events, makeEvent(state.handId, state.street, actor, actionLabel, `${actor} ${kind}${amount ? `s ${amount}` : 's'}.`, seat.isHero ? 'hero' : 'bot', amount || undefined)],
+    events: [...state.events, makeEvent(state.handId, state.street, actor, actionLabel, `${actor} ${kind}${amount ? `s ${amount}` : 's'}.`, seat.isHero ? 'hero' : 'bot', amount || undefined, {
+      playerId: seat.id,
+      position: seat.role,
+      actionType: kind,
+      potBefore,
+      potAfter: potBefore + amount,
+      stackBefore,
+      betSizingPct: kind === 'fold' || kind === 'check' || potBefore <= 0 ? null : amount / potBefore,
+    })],
     message: `${actor} ${kind}${amount ? `s ${amount}` : 's'}.`,
   };
 
