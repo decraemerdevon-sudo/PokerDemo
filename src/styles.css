@@ -48,7 +48,7 @@ button:disabled {
 .app-shell {
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 1fr) 300px;
   min-height: 100vh;
   max-width: 100vw;
   overflow-x: hidden;
@@ -72,9 +72,9 @@ button:disabled {
 
 .top-bar {
   align-items: center;
-  display: flex;
+  display: grid;
   gap: 16px;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   padding: 18px;
 }
 
@@ -132,6 +132,7 @@ h3 {
 
 .table-stage {
   margin-top: 14px;
+  position: relative;
 }
 
 .state-banner {
@@ -166,8 +167,8 @@ h3 {
   border: 14px solid #6e4c2f;
   border-radius: 26px;
   color: #fffaf1;
-  min-height: 520px;
-  padding: 22px;
+  min-height: clamp(610px, calc(100vh - 236px), 720px);
+  padding: 18px;
   position: relative;
 }
 
@@ -177,14 +178,14 @@ h3 {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   display: grid;
-  gap: 12px;
+  gap: 9px;
   left: 50%;
-  max-width: 520px;
-  padding: 16px;
+  max-width: 400px;
+  padding: 13px 14px;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(70%, 520px);
+  width: min(42%, 400px);
   z-index: 2;
 }
 
@@ -198,7 +199,7 @@ h3 {
 
 .pot-chip-area {
   left: 50%;
-  top: calc(50% + 102px);
+  top: calc(50% + 90px);
 }
 
 .player-bet-chips {
@@ -313,7 +314,7 @@ h3 {
 .board-cards,
 .seat-cards {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
 }
 
@@ -338,7 +339,7 @@ dd {
 
 .seats-grid {
   inset: 0;
-  min-height: 476px;
+  min-height: 100%;
   position: absolute;
 }
 
@@ -349,13 +350,13 @@ dd {
   border-radius: 8px;
   color: #1f271f;
   display: grid;
-  gap: 10px;
-  max-width: 280px;
-  padding: 12px;
+  gap: 7px;
+  max-width: 188px;
+  padding: 9px 10px;
   position: absolute;
   transform: translate(-50%, -50%);
   transition: left 180ms ease, top 180ms ease;
-  width: clamp(188px, 28%, 280px);
+  width: clamp(154px, 17vw, 188px);
   z-index: 4;
 }
 
@@ -373,6 +374,13 @@ dd {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.seat-topline strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .seat-position-group {
@@ -385,9 +393,9 @@ dd {
 .seat-position-label {
   background: #dfeae2;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 800;
-  padding: 4px 8px;
+  padding: 4px 7px;
 }
 
 .dealer-chip {
@@ -399,22 +407,33 @@ dd {
   display: inline-flex;
   font-size: 0.66rem;
   font-weight: 950;
-  height: 24px;
+  height: 22px;
   justify-content: center;
-  width: 24px;
+  width: 22px;
 }
 
 .seat p {
   color: #595543;
-  font-size: 0.86rem;
+  font-size: 0.76rem;
   margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .seat-money {
   border-top: 1px solid #ddd2c0;
   color: #2f2b23;
   justify-content: space-between;
-  padding-top: 8px;
+  padding-top: 7px;
+}
+
+.seat-money dt {
+  font-size: 0.66rem;
+}
+
+.seat-money dd {
+  font-size: 0.82rem;
 }
 
 .card {
@@ -424,9 +443,9 @@ dd {
   border-radius: 7px;
   color: #141414;
   display: grid;
-  height: 70px;
+  height: 62px;
   justify-items: center;
-  min-width: 48px;
+  min-width: 42px;
   padding: 6px;
   position: relative;
 }
@@ -453,12 +472,12 @@ dd {
 }
 
 .card-rank {
-  font-size: 1.05rem;
+  font-size: 0.96rem;
   font-weight: 900;
 }
 
 .card-suit {
-  font-size: 1.25rem;
+  font-size: 1.12rem;
 }
 
 .suit-code {
@@ -659,8 +678,7 @@ dd {
 .coach-state,
 .coach-card,
 .error-box,
-.empty-state,
-.review-detail {
+.empty-state {
   border-radius: 8px;
   padding: 12px;
 }
@@ -757,8 +775,8 @@ dd {
 .action-feed-item {
   align-items: center;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 52px minmax(72px, 1fr) 72px 62px 52px;
+  gap: 6px;
+  grid-template-columns: 42px minmax(58px, 1fr) 58px 44px 34px;
   min-height: 44px;
 }
 
@@ -832,20 +850,9 @@ dd {
   margin-bottom: 0;
 }
 
-.review-detail {
-  background: #fff7df;
-  border: 1px solid #ead38a;
-  margin-top: 12px;
-}
-
-.review-detail p {
-  margin-bottom: 0;
-}
-
 .hand-history-toggle {
   align-items: center;
   background: #162f2c;
-  bottom: 18px;
   box-shadow: 0 12px 28px rgba(18, 33, 30, 0.24);
   color: #fffaf1;
   display: flex;
@@ -853,9 +860,11 @@ dd {
   gap: 8px;
   min-height: 46px;
   padding: 0 14px;
-  position: fixed;
-  right: 18px;
   z-index: 20;
+}
+
+.hand-history-top {
+  position: static;
 }
 
 .hand-history-toggle span {
@@ -1161,6 +1170,10 @@ dd {
     position: static;
     transform: none;
     width: 100%;
+  }
+
+  .player-bet-chips {
+    display: none;
   }
 
   .seats-grid {

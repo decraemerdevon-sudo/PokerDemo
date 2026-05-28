@@ -111,10 +111,12 @@ const suits: Suit[] = ['spades', 'hearts', 'diamonds', 'clubs'];
 const streetOrder: Street[] = ['Preflop', 'Flop', 'Turn', 'River'];
 
 const playerBlueprints: TableSeat[] = [
-  { seatIndex: 0, playerId: 'mira', name: 'Mira', chips: 1500, isActive: true, style: 'loose-aggressive' },
-  { seatIndex: 1, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
-  { seatIndex: 2, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
-  { seatIndex: 3, playerId: 'atlas', name: 'Atlas', chips: 1080, isActive: true, style: 'pressure' },
+  { seatIndex: 0, playerId: 'hero', name: 'You', chips: 1500, isActive: true, isHero: true },
+  { seatIndex: 1, playerId: 'mira', name: 'Mira Bot', chips: 1500, isActive: true, style: 'loose-aggressive' },
+  { seatIndex: 2, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
+  { seatIndex: 3, playerId: 'atlas', name: 'Atlas Bot', chips: 1080, isActive: true, style: 'pressure' },
+  { seatIndex: 4, playerId: 'river', name: 'River Bot', chips: 1320, isActive: true, style: 'balanced' },
+  { seatIndex: 5, playerId: 'sage', name: 'Sage Bot', chips: 1225, isActive: true, style: 'pressure' },
 ];
 
 let eventCounter = 0;
