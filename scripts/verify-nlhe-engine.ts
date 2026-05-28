@@ -103,4 +103,60 @@ assert(completed.potAwards[1].winnerIds.includes('c'), 'side pot should exclude 
 assert(chipsAfterAward === chipsBeforeAward, 'chip conservation must hold after side-pot payout');
 assert(potSize(completed) === 250, 'completed hand keeps contribution ledger for history');
 
+const oddChipState: HandState = {
+  ...base,
+  buttonSeatIndex: 1,
+  street: 'River',
+  board: [
+    { rank: 'A', suit: 'clubs' },
+    { rank: 'K', suit: 'diamonds' },
+    { rank: 'Q', suit: 'spades' },
+    { rank: 'J', suit: 'clubs' },
+    { rank: '10', suit: 'hearts' },
+  ],
+  seats: [
+    {
+      ...base.seats[0],
+      id: 'a',
+      name: 'A',
+      cards: [{ rank: '2', suit: 'clubs' }, { rank: '3', suit: 'diamonds' }],
+      stack: 899,
+      stackAtHandStart: 1000,
+      contribution: 101,
+      streetContribution: 0,
+      status: 'active',
+    },
+    {
+      ...base.seats[1],
+      id: 'b',
+      name: 'B',
+      cards: [{ rank: '2', suit: 'spades' }, { rank: '3', suit: 'hearts' }],
+      stack: 899,
+      stackAtHandStart: 1000,
+      contribution: 101,
+      streetContribution: 0,
+      status: 'folded',
+    },
+    {
+      ...base.seats[2],
+      id: 'c',
+      name: 'C',
+      cards: [{ rank: '4', suit: 'spades' }, { rank: '5', suit: 'hearts' }],
+      stack: 899,
+      stackAtHandStart: 1000,
+      contribution: 101,
+      streetContribution: 0,
+      status: 'active',
+    },
+  ],
+  currentSeatId: 'a',
+  actedThisRound: ['c'],
+  minRaise: 30,
+  stage: 'awaiting-action',
+};
+const oddChipCompleted = submitAction(oddChipState, 'a', 'check');
+const mainPotPayouts = oddChipCompleted.potAwards[0].payouts;
+assert(mainPotPayouts.c === 152, `odd chip should go first left of button, expected C to receive 152 got ${mainPotPayouts.c}`);
+assert(mainPotPayouts.a === 151, `remaining tied winner should receive 151, got ${mainPotPayouts.a}`);
+
 console.log('NLHE engine verification passed');

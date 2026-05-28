@@ -134,15 +134,15 @@ function makeEvent(
 }
 
 function randomIndex(maxExclusive: number) {
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const values = new Uint32Array(1);
-    const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
-    do {
-      crypto.getRandomValues(values);
-    } while (values[0] >= limit);
-    return values[0] % maxExclusive;
+  if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
+    throw new Error('Secure crypto RNG is required to shuffle the deck');
   }
-  return Math.floor(Math.random() * maxExclusive);
+  const values = new Uint32Array(1);
+  const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+  return values[0] % maxExclusive;
 }
 
 export function createFreshDeck(): Card[] {
@@ -537,6 +537,11 @@ function handDescription(score: HandScore) {
   return ['High card', 'Pair', 'Two pair', 'Trips', 'Straight', 'Flush', 'Full house', 'Quads', 'Straight flush'][score[0]] ?? 'Best hand';
 }
 
+function distanceLeftOfButton(seatIndex: number, buttonSeatIndex: number, seatCount: number) {
+  const distance = (seatIndex - buttonSeatIndex + seatCount) % seatCount;
+  return distance === 0 ? seatCount : distance;
+}
+
 function awardHand(state: HandState, reason: string): HandState {
   const contributionTiers = Array.from(new Set(state.seats.map((seat) => seat.contribution).filter((amount) => amount > 0))).sort((a, b) => a - b);
   const showdown = state.board.length === 5 && state.seats.filter((seat) => seat.status !== 'folded').length > 1;
@@ -556,7 +561,11 @@ function awardHand(state: HandState, reason: string): HandState {
       return !best || compareScores(score, best) > 0 ? score : best;
     }, null);
     const winners = eligible.length === 1 ? eligible : eligible.filter((seat) => compareScores(evaluateBestHand([...seat.cards, ...state.board]), bestScore ?? [0]) === 0);
-    const orderedWinners = [...winners].sort((a, b) => a.seatIndex - b.seatIndex);
+    const orderedWinners = [...winners].sort((a, b) => {
+      const aDistance = distanceLeftOfButton(a.seatIndex, state.buttonSeatIndex, state.seats.length);
+      const bDistance = distanceLeftOfButton(b.seatIndex, state.buttonSeatIndex, state.seats.length);
+      return aDistance - bDistance;
+    });
     const baseShare = orderedWinners.length ? Math.floor(amount / orderedWinners.length) : 0;
     let remainder = orderedWinners.length ? amount % orderedWinners.length : 0;
     const potPayouts: Record<string, number> = {};
