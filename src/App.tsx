@@ -2,6 +2,7 @@ import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
 import {
   ActionKind,
   Card,
+  EngineStage,
   HandEvent,
   HandState,
   Seat,
@@ -21,6 +22,8 @@ import { appendCompletedHand, calculateSessionStats, HandRecord, loadSessionHist
 
 type TableMode = 'play' | 'review';
 type CoachState = 'idle' | 'loading' | 'ready' | 'error';
+type CardState = 'face_up' | 'face_down' | 'unknown';
+type HandPhase = EngineStage | 'complete';
 type ChipDenomination = {
   value: number;
   color: string;
@@ -42,7 +45,12 @@ const CHIP_DENOMINATIONS: ChipDenomination[] = [
 const fourSeatAngles = [315, 45, 225, 135];
 
 const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
-const suitSymbols: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
+const SUIT_COLORS: Record<Card['suit'], { primary: string; label: string; hex: string }> = {
+  spades: { primary: '#1a1a1a', label: '♠', hex: '#1a1a1a' },
+  hearts: { primary: '#CC0000', label: '♥', hex: '#CC0000' },
+  diamonds: { primary: '#0066CC', label: '♦', hex: '#0066CC' },
+  clubs: { primary: '#1a7a1a', label: '♣', hex: '#1a7a1a' },
+};
 
 function formatMoney(value: number) {
   return `$${value.toLocaleString()}`;
@@ -107,14 +115,47 @@ function buildCoachAdvice(state: HandState) {
   return `Hero holds ${cardText(hero.cards)} on ${state.street.toLowerCase()} with ${formatMoney(potSize(state))} in the pot. Board: ${boardText} (${texture(board)}). Legal actions: ${actionText}. Recent action: ${recent || 'none'}.`;
 }
 
-function CardView({ card, hidden = false }: { card: Card; hidden?: boolean }) {
-  const isRed = card.suit === 'hearts' || card.suit === 'diamonds';
+function getCardState(card: Card | null, _playerId: string, isHuman: boolean, handPhase: HandPhase): CardState {
+  if (isHuman) return card ? 'face_up' : 'face_down';
+  if (handPhase !== 'complete' && handPhase !== 'hand-complete') return 'face_down';
+  if (card === null) return 'face_down';
+  return 'face_up';
+}
+
+function CardView({ card, state = 'face_up', empty = false }: { card: Card | null; state?: CardState; empty?: boolean }) {
+  if (empty) {
+    return <span aria-label="empty community card slot" className="card card-empty" />;
+  }
+
+  if (state === 'unknown') {
+    return (
+      <span aria-label="unknown card" className="card card-unknown">
+        <span aria-hidden="true" className="card-unknown-mark">?</span>
+      </span>
+    );
+  }
+
+  if (state === 'face_down' || !card) {
+    return (
+      <span aria-label="face-down card" className="card card-back">
+        <span className="sr-only">face-down card</span>
+      </span>
+    );
+  }
+
+  const suit = SUIT_COLORS[card.suit];
   return (
-    <span className={`card ${isRed ? 'card-red' : 'card-black'} ${hidden ? 'card-hidden' : ''}`}>
-      <span className="card-rank">{hidden ? '?' : card.rank}</span>
-      <span aria-hidden="true" className="card-suit">{hidden ? '*' : suitSymbols[card.suit]}</span>
-      <span className="sr-only">{hidden ? 'hidden card' : `${card.rank} of ${card.suit}`}</span>
-      {!hidden && <span className="suit-code">{suitLabels[card.suit]}</span>}
+    <span className="card card-face" style={{ color: suit.primary }}>
+      <span className="card-corner card-corner-top" aria-hidden="true">
+        <span>{card.rank}</span>
+        <span>{suit.label}</span>
+      </span>
+      <span aria-hidden="true" className="card-suit">{suit.label}</span>
+      <span className="card-corner card-corner-bottom" aria-hidden="true">
+        <span>{card.rank}</span>
+        <span>{suit.label}</span>
+      </span>
+      <span className="sr-only">{`${card.rank} of ${card.suit}`}</span>
     </span>
   );
 }
@@ -161,7 +202,7 @@ function ChipStacksView({ amount, label, size = 'player' }: { amount: number; la
   );
 }
 
-function SeatView({ seat, street, reveal, positionLabel, isButton }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean }) {
+function SeatView({ seat, street, reveal, positionLabel, isButton, handPhase }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean; handPhase: HandPhase }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
   return (
     <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`}>
@@ -176,7 +217,7 @@ function SeatView({ seat, street, reveal, positionLabel, isButton }: { seat: Sea
         <p>{seat.status === 'folded' ? 'Folded' : seat.status === 'all-in' ? 'All-in' : seat.lastAction}</p>
       </div>
       <div className="seat-cards" aria-label={`${seat.name} cards`}>
-        {seat.cards.map((card, index) => <CardView key={`${seat.id}-${street}-${index}`} card={card} hidden={!reveal} />)}
+        {seat.cards.map((card, index) => <CardView key={`${seat.id}-${street}-${index}`} card={card} state={getCardState(card, seat.id, Boolean(seat.isHero) || reveal, handPhase)} />)}
       </div>
       <dl className="seat-money">
         <div><dt>Stack</dt><dd>{formatMoney(seat.stack)}</dd></div>
@@ -247,12 +288,17 @@ function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) 
 }
 
 function HiddenCards() {
-  return <span className="hidden-cards" aria-label="hidden hole cards">[? ?]</span>;
+  return (
+    <span className="history-cards" aria-label="unknown hole cards">
+      <CardView card={null} state="unknown" />
+      <CardView card={null} state="unknown" />
+    </span>
+  );
 }
 
 function HistoryCards({ cards }: { cards: Card[] | null }) {
   if (!cards) return <HiddenCards />;
-  return <span className="history-cards">{cards.map((card, index) => <CardView key={`${card.rank}-${card.suit}-${index}`} card={card} />)}</span>;
+  return <span className="history-cards">{cards.map((card, index) => <CardView key={`${card.rank}-${card.suit}-${index}`} card={card} state="face_up" />)}</span>;
 }
 
 function streetTitle(street: StreetKey, hand: HandRecord) {
@@ -498,7 +544,12 @@ function App() {
             {state.seats.map((seat, index) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(index, state.seats.length)} />)}
             <div className="board">
               <p>Board</p>
-              <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
+              <div className="board-cards">
+                {Array.from({ length: 5 }, (_, index) => {
+                  const card = board[index] ?? null;
+                  return <CardView key={card ? `${card.rank}-${card.suit}` : `board-empty-${index}`} card={card} empty={!card} state="face_up" />;
+                })}
+              </div>
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => (
@@ -506,6 +557,7 @@ function App() {
                 isButton={seat.seatIndex === state.buttonSeatIndex}
                 key={seat.id}
                 positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
+                handPhase={state.stage}
                 reveal={seat.isHero || showAllCards}
                 seat={seat}
                 street={state.street}
