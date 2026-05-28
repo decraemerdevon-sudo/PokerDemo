@@ -23,6 +23,20 @@ assert(deck.length === 52, `expected 52 cards, got ${deck.length}`);
 assert(keys.size === 52, 'fresh deck must contain 52 unique cards');
 assert(shuffleDeck(deck).length === 52, 'shuffle must preserve deck size');
 
+const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+try {
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: undefined });
+  let rejectedInsecureShuffle = false;
+  try {
+    shuffleDeck(deck);
+  } catch (error) {
+    rejectedInsecureShuffle = error instanceof Error && error.message.includes('Secure crypto RNG is required');
+  }
+  assert(rejectedInsecureShuffle, 'shuffle must reject runtimes without crypto RNG');
+} finally {
+  if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor);
+}
+
 const table = createInitialTable([
   { seatIndex: 0, playerId: 'hero', name: 'Hero', chips: 1000, isActive: true, isHero: true },
   { seatIndex: 1, playerId: 'villain', name: 'Villain', chips: 1000, isActive: true },
