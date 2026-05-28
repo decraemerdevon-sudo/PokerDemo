@@ -474,7 +474,7 @@ function App() {
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); setSelectedEvent((current) => Math.max(0, current - 1)); }
   };
 
-  const showAllCards = state.stage === 'hand-complete' || mode === 'review';
+  const showAllCards = state.stage === 'hand-complete';
 
   return (
     <main className="app-shell">
@@ -545,6 +545,10 @@ function App() {
                 onSelect={(index) => { setSelectedEvent(index); setMode('review'); }}
                 selectedEvent={selectedEvent}
               />
+              <div className="timeline-hero-hand" aria-label="Your hole cards">
+                <span>Your hand</span>
+                <HistoryCards cards={hero.cards} />
+              </div>
               <article className="review-detail"><h3>{activeEvent.action} review</h3><p>{activeEvent.note}</p></article>
             </>
           ) : <div className="empty-state"><strong>Empty history</strong><p>No hand events are selected for review.</p></div>}
