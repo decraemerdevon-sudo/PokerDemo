@@ -198,6 +198,7 @@ function eventTimeLabel(events: HandEvent[], index: number) {
 function streetDividerLabel(event: HandEvent) {
   if (event.action !== 'Deal street') return event.street;
   const dealt = event.note.replace(/^Burned one and dealt /, '').replace(/\. Betting round.*$/, '');
+  if (dealt.toLowerCase() === event.street.toLowerCase()) return event.street;
   return `${event.street} - ${dealt}`;
 }
 
