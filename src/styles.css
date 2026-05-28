@@ -48,8 +48,10 @@ button:disabled {
 .app-shell {
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   min-height: 100vh;
+  max-width: 100vw;
+  overflow-x: hidden;
   padding: 18px;
 }
 
@@ -335,15 +337,13 @@ dd {
 }
 
 .seats-grid {
-  display: grid;
-  gap: 18px;
-  grid-template-columns: repeat(2, minmax(190px, 1fr));
+  inset: 0;
   min-height: 476px;
+  position: absolute;
 }
 
 .seat {
   align-content: start;
-  align-self: start;
   background: rgba(255, 250, 241, 0.95);
   border: 2px solid transparent;
   border-radius: 8px;
@@ -352,16 +352,11 @@ dd {
   gap: 10px;
   max-width: 280px;
   padding: 12px;
-}
-
-.seat:nth-child(2),
-.seat:nth-child(4) {
-  justify-self: end;
-}
-
-.seat:nth-child(3),
-.seat:nth-child(4) {
-  align-self: end;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  transition: left 180ms ease, top 180ms ease;
+  width: clamp(188px, 28%, 280px);
+  z-index: 4;
 }
 
 .seat-hero {
@@ -436,12 +431,20 @@ dd {
   position: relative;
 }
 
-.card-red {
+.card-spade {
+  color: #202020;
+}
+
+.card-heart {
   color: #b32931;
 }
 
-.card-black {
-  color: #202020;
+.card-diamond {
+  color: #0f65c8;
+}
+
+.card-club {
+  color: #18743a;
 }
 
 .card-hidden {
@@ -485,7 +488,13 @@ dd {
 .action-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.betting-controls {
+  display: grid;
+  gap: 10px;
+  position: relative;
 }
 
 .primary-action,
@@ -499,14 +508,102 @@ dd {
 .primary-action {
   background: #1e4c45;
   color: #fffaf1;
-  display: grid;
-  gap: 3px;
+  align-items: center;
+  display: flex;
+  justify-content: center;
   padding: 9px;
+  text-align: center;
 }
 
-.primary-action small {
-  color: #c9e1da;
-  font-size: 0.72rem;
+.custom-bet-toggle {
+  background: #274a67;
+}
+
+.custom-bet-panel {
+  background: #fffdf9;
+  border: 1px solid #d6cbb8;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(43, 35, 21, 0.16);
+  color: #211d18;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.custom-bet-heading,
+.custom-bet-range,
+.quick-sizes {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.custom-bet-heading h3 {
+  margin: 0;
+}
+
+.custom-bet-heading span,
+.custom-bet-range,
+.quick-sizes span {
+  color: #676151;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.custom-bet-input input {
+  background: #f7f1e6;
+  border: 2px solid #cfc2ad;
+  border-radius: 8px;
+  color: #1f271f;
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 900;
+  min-height: 46px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.custom-bet-input input:focus {
+  border-color: #1e4c45;
+  outline: 0;
+}
+
+.custom-bet-input input.input-flash {
+  animation: inputFlash 240ms ease;
+  border-color: #b7332c;
+}
+
+.custom-bet-slider {
+  accent-color: #1e4c45;
+  width: 100%;
+}
+
+.quick-sizes {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.quick-sizes button,
+.confirm-bet {
+  background: #e7dfd0;
+  color: #282319;
+  font-weight: 850;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.confirm-bet {
+  background: #f4bf45;
+  justify-self: center;
+  min-width: 160px;
+}
+
+.custom-bet-error {
+  color: #9f241d;
+  font-size: 0.84rem;
+  font-weight: 800;
+  margin: -2px 0 0;
 }
 
 .ghost-action,
@@ -980,6 +1077,21 @@ dd {
   }
 }
 
+@keyframes inputFlash {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  35% {
+    transform: translateX(-4px);
+  }
+
+  70% {
+    transform: translateX(4px);
+  }
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1034,8 +1146,10 @@ dd {
   }
 
   .seats-grid {
+    display: grid;
     grid-template-columns: 1fr;
     min-height: 0;
+    position: static;
   }
 
   .seat,
@@ -1043,6 +1157,9 @@ dd {
   .seat:nth-child(4) {
     justify-self: stretch;
     max-width: none;
+    position: static;
+    transform: none;
+    width: auto;
   }
 
   .seat:nth-child(3),

@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionKind,
   Card,
@@ -16,11 +16,11 @@ import {
   syncTableFromHand,
   visibleBoard,
 } from './nlheEngine';
+import { getSeatPosition, seatAngleForIndex } from './seatGeometry';
 import { trackHandHistoryEvent } from './handHistoryAnalytics';
 import { appendCompletedHand, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
 type TableMode = 'play' | 'review';
-type CoachState = 'idle' | 'loading' | 'ready' | 'error';
 type ChipDenomination = {
   value: number;
   color: string;
@@ -31,6 +31,12 @@ type ChipStack = {
   denomination: ChipDenomination;
   count: number;
 };
+type CustomBetState = {
+  isOpen: boolean;
+  value: number;
+  min: number;
+  max: number;
+};
 
 const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 1000, color: '#FFD700', borderColor: '#B8860B', label: '1K' },
@@ -39,10 +45,14 @@ const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 5, color: '#CC0000', borderColor: '#8B0000', label: '5' },
   { value: 1, color: '#F5F5F5', borderColor: '#AAAAAA', label: '1' },
 ];
-const fourSeatAngles = [315, 45, 225, 135];
-
 const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
-const suitSymbols: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
+const suitSymbols: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+const suitClasses: Record<Card['suit'], string> = {
+  spades: 'card-spade',
+  hearts: 'card-heart',
+  diamonds: 'card-diamond',
+  clubs: 'card-club',
+};
 
 function formatMoney(value: number) {
   return `$${value.toLocaleString()}`;
@@ -67,16 +77,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
   const chipOffset = seatRadius * 0.38;
-  const angleRad = (seatAngle - 90) * (Math.PI / 180);
-  return {
-    x: tableCenter.x + (seatRadius - chipOffset) * Math.cos(angleRad),
-    y: tableCenter.y + (seatRadius - chipOffset) * Math.sin(angleRad),
-  };
-}
-
-function seatAngleForIndex(index: number, seatCount: number) {
-  if (seatCount === 4) return fourSeatAngles[index] ?? 0;
-  return (index * 360) / Math.max(seatCount, 1);
+  return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
 function texture(cards: Card[]) {
@@ -97,6 +98,10 @@ function signedMoney(value: number) {
   return `${value > 0 ? '+' : '-'}${formatMoney(Math.abs(value))}`;
 }
 
+function clampWholeChip(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
 function buildCoachAdvice(state: HandState) {
   const hero = state.seats.find((seat) => seat.isHero)!;
   const legal = getLegalActions(state, hero.id);
@@ -108,11 +113,10 @@ function buildCoachAdvice(state: HandState) {
 }
 
 function CardView({ card, hidden = false }: { card: Card; hidden?: boolean }) {
-  const isRed = card.suit === 'hearts' || card.suit === 'diamonds';
   return (
-    <span className={`card ${isRed ? 'card-red' : 'card-black'} ${hidden ? 'card-hidden' : ''}`}>
+    <span className={`card ${hidden ? 'card-hidden' : suitClasses[card.suit]}`}>
       <span className="card-rank">{hidden ? '?' : card.rank}</span>
-      <span aria-hidden="true" className="card-suit">{hidden ? '*' : suitSymbols[card.suit]}</span>
+      <span aria-hidden="true" className="card-suit">{hidden ? '?' : suitSymbols[card.suit]}</span>
       <span className="sr-only">{hidden ? 'hidden card' : `${card.rank} of ${card.suit}`}</span>
       {!hidden && <span className="suit-code">{suitLabels[card.suit]}</span>}
     </span>
@@ -161,10 +165,10 @@ function ChipStacksView({ amount, label, size = 'player' }: { amount: number; la
   );
 }
 
-function SeatView({ seat, street, reveal, positionLabel, isButton }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean }) {
+function SeatView({ seat, street, reveal, positionLabel, isButton, style }: { seat: Seat; street: Street; reveal: boolean; positionLabel: string; isButton: boolean; style?: CSSProperties }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
   return (
-    <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`}>
+    <article className={`seat ${seat.isHero ? 'seat-hero' : ''} ${seat.status === 'folded' ? 'seat-folded' : ''} ${isCurrent ? 'seat-current' : ''}`} aria-label={`${seat.name} seat`} style={style}>
       <div>
         <div className="seat-topline">
           <strong>{seat.name}</strong>
@@ -389,20 +393,30 @@ function App() {
   const [handHistoryOpen, setHandHistoryOpen] = useState(false);
   const [sessionHistory, setSessionHistory] = useState<HandRecord[]>(() => loadSessionHistory());
   const [selectedHandId, setSelectedHandId] = useState<string | null>(() => loadSessionHistory()[0]?.handId ?? null);
-  const [coachState, setCoachState] = useState<CoachState>('idle');
-  const [coachAdvice, setCoachAdvice] = useState('');
+  const [customBet, setCustomBet] = useState<CustomBetState>({ isOpen: false, value: 0, min: 0, max: 0 });
+  const [customBetError, setCustomBetError] = useState('');
+  const [customBetFlash, setCustomBetFlash] = useState(false);
+  const customBetRef = useRef<HTMLDivElement | null>(null);
 
   const board = visibleBoard(state);
   const pot = potSize(state);
   const hero = state.seats.find((seat) => seat.isHero)!;
   const activeSeat = state.currentSeatId ? state.seats.find((seat) => seat.id === state.currentSeatId) : undefined;
   const legalActions = useMemo(() => getLegalActions(state, hero.id), [state, hero.id]);
+  const customBetAction = legalActions.find((action) => action.kind === 'raise') ?? legalActions.find((action) => action.kind === 'bet');
+  const customBetLimits = useMemo(() => {
+    if (!customBetAction) return null;
+    const min = customBetAction.min ?? (customBetAction.kind === 'bet' ? state.bigBlind : customBetAction.targetContribution);
+    const max = customBetAction.max ?? hero.streetContribution + hero.stack;
+    return { min, max };
+  }, [customBetAction, hero.stack, hero.streetContribution, state.bigBlind]);
   const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
+  const coachAdvice = useMemo(() => buildCoachAdvice(state), [state]);
 
   useEffect(() => {
     const last = state.events[state.events.length - 1];
@@ -448,24 +462,81 @@ function App() {
       });
       setSelectedEvent(0);
       setMode('play');
-      setCoachState('idle');
-      setCoachAdvice('');
+      setCustomBet((current) => ({ ...current, isOpen: false }));
+      setCustomBetError('');
     }, 1800);
     return () => window.clearTimeout(timer);
   }, [state.stage]);
+
+  useEffect(() => {
+    if (!customBet.isOpen || !customBetLimits) return;
+    setCustomBet((current) => ({
+      ...current,
+      min: customBetLimits.min,
+      max: customBetLimits.max,
+      value: clampWholeChip(current.value || customBetLimits.min, customBetLimits.min, customBetLimits.max),
+    }));
+  }, [customBet.isOpen, customBetLimits]);
+
+  useEffect(() => {
+    if (!customBet.isOpen) return;
+    const closeCustomBet = (event: MouseEvent) => {
+      if (customBetRef.current?.contains(event.target as Node)) return;
+      setCustomBet((current) => ({ ...current, isOpen: false }));
+      setCustomBetError('');
+    };
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setCustomBet((current) => ({ ...current, isOpen: false }));
+      setCustomBetError('');
+    };
+    document.addEventListener('mousedown', closeCustomBet);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeCustomBet);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [customBet.isOpen]);
 
   const runAction = (kind: ActionKind, targetContribution?: number) => {
     if (!isHeroTurn) return;
     setTableState((current) => ({ ...current, hand: submitAction(current.hand, hero.id, kind, targetContribution) }));
     setMode('play');
+    setCustomBet((current) => ({ ...current, isOpen: false }));
+    setCustomBetError('');
   };
 
-  const askCoach = () => {
-    setCoachState('loading');
-    window.setTimeout(() => {
-      setCoachAdvice(buildCoachAdvice(state));
-      setCoachState('ready');
-    }, 450);
+  const toggleCustomBet = () => {
+    if (!customBetLimits) return;
+    setCustomBet((current) => ({
+      isOpen: !current.isOpen,
+      min: customBetLimits.min,
+      max: customBetLimits.max,
+      value: clampWholeChip(current.value || customBetLimits.min, customBetLimits.min, customBetLimits.max),
+    }));
+    setCustomBetError('');
+  };
+
+  const setCustomBetValue = (value: number) => {
+    setCustomBet((current) => ({ ...current, value: Math.round(value) }));
+    setCustomBetError('');
+  };
+
+  const applyQuickSize = (size: number) => {
+    if (!customBetLimits) return;
+    setCustomBetValue(clampWholeChip(size, customBetLimits.min, customBetLimits.max));
+  };
+
+  const confirmCustomBet = () => {
+    if (!customBetAction || !customBetLimits) return;
+    const value = Math.round(customBet.value);
+    if (value < customBetLimits.min) {
+      setCustomBetError(`Minimum bet is ${formatMoney(customBetLimits.min)}`);
+      setCustomBetFlash(true);
+      window.setTimeout(() => setCustomBetFlash(false), 240);
+      return;
+    }
+    runAction(customBetAction.kind, Math.min(value, customBetLimits.max));
   };
 
   const handleTimelineKey = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -495,45 +566,91 @@ function App() {
             <div className="pot-chip-area">
               <ChipStacksView amount={pot} label="Pot" size="pot" />
             </div>
-            {state.seats.map((seat, index) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(index, state.seats.length)} />)}
+            {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, state.seats.length)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
-            <div className="seats-grid">{state.seats.map((seat) => (
-              <SeatView
-                isButton={seat.seatIndex === state.buttonSeatIndex}
-                key={seat.id}
-                positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
-                reveal={seat.isHero || showAllCards}
-                seat={seat}
-                street={state.street}
-              />
-            ))}</div>
+            <div className="seats-grid">{state.seats.map((seat) => {
+              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, state.seats.length), { x: 50, y: 50 }, 32);
+              return (
+                <SeatView
+                  isButton={seat.seatIndex === state.buttonSeatIndex}
+                  key={seat.id}
+                  positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
+                  reveal={seat.isHero || showAllCards}
+                  seat={seat}
+                  street={state.street}
+                  style={{ left: `${position.x}%`, top: `${position.y}%` }}
+                />
+              );
+            })}</div>
           </div>
         </div>
         <section className="action-panel" aria-labelledby="actions-title">
           <div><h2 id="actions-title">Legal Actions</h2><p aria-live="polite">{activeSeat?.isHero ? 'Action is on you.' : activeSeat ? `${activeSeat.name} is resolving a legal engine action.` : state.message}</p></div>
-          <div className="action-grid">
+          <div className="betting-controls" ref={customBetRef}>
+            {customBet.isOpen && customBetLimits && (
+              <div className="custom-bet-panel" role="dialog" aria-labelledby="custom-bet-title">
+                <div className="custom-bet-heading">
+                  <h3 id="custom-bet-title">Custom Bet</h3>
+                  <span>{formatMoney(customBetLimits.min)} - {formatMoney(customBetLimits.max)}</span>
+                </div>
+                <label className="custom-bet-input">
+                  <span className="sr-only">Custom bet amount</span>
+                  <input
+                    aria-describedby={customBetError ? 'custom-bet-error' : undefined}
+                    className={customBetFlash ? 'input-flash' : ''}
+                    inputMode="numeric"
+                    max={customBetLimits.max}
+                    min={customBetLimits.min}
+                    onChange={(event) => setCustomBetValue(Number(event.target.value))}
+                    type="number"
+                    value={Number.isNaN(customBet.value) ? '' : customBet.value}
+                  />
+                </label>
+                <input
+                  aria-label="Custom bet amount slider"
+                  className="custom-bet-slider"
+                  max={customBetLimits.max}
+                  min={customBetLimits.min}
+                  onChange={(event) => setCustomBetValue(Number(event.target.value))}
+                  step={1}
+                  type="range"
+                  value={clampWholeChip(customBet.value || customBetLimits.min, customBetLimits.min, customBetLimits.max)}
+                />
+                <div className="custom-bet-range"><span>Min: {formatMoney(customBetLimits.min)}</span><span>Max: {formatMoney(customBetLimits.max)}</span></div>
+                <div className="quick-sizes" aria-label="Quick bet sizes">
+                  <span>Quick sizes:</span>
+                  <button onClick={() => applyQuickSize(Math.floor(pot * 0.5))} type="button">1/2 Pot</button>
+                  <button onClick={() => applyQuickSize(pot)} type="button">Pot</button>
+                  <button onClick={() => applyQuickSize(pot * 2)} type="button">2x Pot</button>
+                </div>
+                {customBetError && <p className="custom-bet-error" id="custom-bet-error" role="alert">{customBetError}</p>}
+                <button className="confirm-bet" disabled={!isHeroTurn} onClick={confirmCustomBet} type="button">Confirm Bet</button>
+              </div>
+            )}
+            <div className="action-grid">
             {legalActions.map((action) => (
               <button className="primary-action" disabled={!isHeroTurn} key={action.kind} onClick={() => runAction(action.kind, action.targetContribution)} type="button">
                 <span>{action.label}</span>
-                <small>{isHeroTurn ? 'Legal' : 'Locked'}</small>
               </button>
             ))}
+            {customBetAction && (
+              <button aria-expanded={customBet.isOpen} className="primary-action custom-bet-toggle" disabled={!isHeroTurn} onClick={toggleCustomBet} type="button">
+                <span>Custom Bet</span>
+              </button>
+            )}
             <span className="auto-hand-status" role="status">{state.stage === 'hand-complete' ? 'Next hand auto-starts' : 'Hand in progress'}</span>
+            </div>
           </div>
         </section>
       </section>
       <aside className="side-rail" aria-label="Training side panels">
         <section className="coach-panel" aria-labelledby="coach-title">
-          <div className="panel-heading"><div><p className="eyebrow">Opt-in</p><h2 id="coach-title">Coach</h2></div><button onClick={askCoach} type="button">Ask</button></div>
-          {coachState === 'idle' && <p className="muted">Coach is hidden until requested, so table decisions stay primary.</p>}
-          {coachState === 'loading' && <div className="coach-state" role="status" aria-live="polite"><span className="spinner" aria-hidden="true" />Loading range advice...</div>}
-          {coachState === 'ready' && <div className="coach-card"><strong>Suggested line: use only legal engine actions</strong><p>{coachAdvice}</p></div>}
-          {coachState === 'error' && <div className="error-box" role="alert">Coach failed to load. Keep playing or retry when the trainer reconnects.</div>}
-          <button className="text-button" onClick={() => setCoachState('error')} type="button">Simulate coach error</button>
+          <div className="panel-heading"><div><p className="eyebrow">Live context</p><h2 id="coach-title">Coach</h2></div></div>
+          <div className="coach-card"><strong>Suggested line: use only engine actions</strong><p>{coachAdvice}</p></div>
         </section>
         <section className="review-panel" aria-labelledby="review-title">
           <div className="panel-heading"><div><p className="eyebrow">Replay</p><h2 id="review-title">Hand Timeline</h2></div><button onClick={() => setHistoryVisible((visible) => !visible)} type="button">{historyVisible ? 'Hide' : 'Show'}</button></div>
