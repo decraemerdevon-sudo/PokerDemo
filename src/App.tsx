@@ -242,7 +242,7 @@ function ActionFeed({ events, selectedEvent, onSelect, onKeyDown }: {
 
 function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) {
   if (seat.streetContribution <= 0) return null;
-  const position = getChipPosition(seatAngle, { x: 50, y: 50 }, 56);
+  const position = getChipPosition(seatAngle, { x: 50, y: 50 }, 50);
   return (
     <div className="player-bet-chips" style={{ left: `${position.x}%`, top: `${position.y}%` }}>
       <ChipStacksView amount={seat.streetContribution} label={seat.name} />
@@ -410,7 +410,6 @@ function App() {
     const max = customBetAction.max ?? hero.streetContribution + hero.stack;
     return { min, max };
   }, [customBetAction, hero.stack, hero.streetContribution, state.bigBlind]);
-  const activeEvent = state.events[selectedEvent] || state.events[state.events.length - 1];
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
   const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
@@ -552,6 +551,9 @@ function App() {
       <section className="table-panel" aria-labelledby="table-title">
         <header className="top-bar">
           <div><p className="eyebrow">Texas Hold'em trainer</p><h1 id="table-title">Training Table</h1></div>
+          <button className="hand-history-toggle hand-history-top" onClick={() => setHandHistoryOpen((open) => !open)} type="button" aria-expanded={handHistoryOpen}>
+            <span aria-hidden="true">H</span> Hand History
+          </button>
           <div className="status-group" aria-label="table state">
             <span className="state-chip active">{modeLabel}</span>
             <span className="state-chip">{state.street}</span>
@@ -666,14 +668,10 @@ function App() {
                 <span>Your hand</span>
                 <HistoryCards cards={hero.cards} />
               </div>
-              <article className="review-detail"><h3>{activeEvent.action} review</h3><p>{activeEvent.note}</p></article>
             </>
           ) : <div className="empty-state"><strong>Empty history</strong><p>No hand events are selected for review.</p></div>}
         </section>
       </aside>
-      <button className="hand-history-toggle" onClick={() => setHandHistoryOpen((open) => !open)} type="button" aria-expanded={handHistoryOpen}>
-        <span aria-hidden="true">H</span> Hand History
-      </button>
       {handHistoryOpen && <HandHistoryPanel history={sessionHistory} selectedHandId={selectedHandId} setSelectedHandId={setSelectedHandId} stats={sessionStats} onClose={() => setHandHistoryOpen(false)} />}
     </main>
   );
