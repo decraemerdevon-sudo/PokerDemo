@@ -58,8 +58,8 @@ const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 5, color: '#CC0000', borderColor: '#8B0000', label: '5' },
   { value: 1, color: '#F5F5F5', borderColor: '#AAAAAA', label: '1' },
 ];
-const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
-const suitSymbols: Record<Card['suit'], string> = { spades: '?', hearts: '?', diamonds: '?', clubs: '?' };
+const suitLabels: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+const suitSymbols: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
 const suitClasses: Record<Card['suit'], string> = {
   spades: 'card-spade',
   hearts: 'card-heart',
@@ -89,7 +89,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 }
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
-  const chipOffset = seatRadius * 0.38;
+  const chipOffset = seatRadius * 0.48;
   return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
@@ -264,7 +264,7 @@ function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) 
   const position = getChipPosition(seatAngle, { x: 50, y: 50 }, 50);
   return (
     <div className="player-bet-chips" style={{ left: `${position.x}%`, top: `${position.y}%` }}>
-      <ChipStacksView amount={seat.streetContribution} label={seat.name} />
+      <ChipStacksView amount={seat.streetContribution} />
     </div>
   );
 }
@@ -710,13 +710,13 @@ function App() {
           </div>
           <div className="felt" aria-label="Poker table">
             <div className="pot-chip-area">
-              <ChipStacksView amount={pot} label="Pot" size="pot" />
+              <ChipStacksView amount={pot} size="pot" />
             </div>
             {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, tableSeatCount)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
-              <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
+              <dl className="pot-summary"><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
               const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, tableSeatCount), { x: 50, y: 50 }, 32);
