@@ -17,14 +17,16 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   const pool = new Pool({ connectionString: url });
   try {
+    await pool.query(`DROP TABLE IF EXISTS hands`);
+    await pool.query(`DROP TABLE IF EXISTS sessions`);
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS sessions (
+      CREATE TABLE sessions (
         session_id TEXT PRIMARY KEY,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS hands (
+      CREATE TABLE hands (
         hand_id              TEXT PRIMARY KEY,
         session_id           TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
         hand_number          INTEGER NOT NULL,
@@ -33,17 +35,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
         flop_cards           JSONB,
         turn_card            JSONB,
         river_card           JSONB,
-        saw_flop             TEXT[] NOT NULL DEFAULT '{}',
-        went_to_showdown     TEXT[] NOT NULL DEFAULT '{}',
-        voluntary_put_in_pot TEXT[] NOT NULL DEFAULT '{}',
+        saw_flop             JSONB NOT NULL DEFAULT '[]',
+        went_to_showdown     JSONB NOT NULL DEFAULT '[]',
+        voluntary_put_in_pot JSONB NOT NULL DEFAULT '[]',
         players              JSONB NOT NULL,
         streets              JSONB NOT NULL,
         pots                 JSONB NOT NULL,
         created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS hands_session_id_idx ON hands(session_id)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS hands_timestamp_idx  ON hands(timestamp DESC)`);
+    await pool.query(`CREATE INDEX hands_session_id_idx ON hands(session_id)`);
+    await pool.query(`CREATE INDEX hands_timestamp_idx  ON hands(timestamp DESC)`);
     response.status(200).json({ ok: true, message: 'Schema applied successfully' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';

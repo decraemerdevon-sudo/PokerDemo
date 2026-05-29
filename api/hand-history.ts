@@ -1,16 +1,14 @@
 import { getDb } from './db';
 
-type Card = { rank: string; suit: string };
-
 type HandRecord = {
   handId: string;
   handNumber: number;
   timestamp: number;
   buttonSeatIndex: number;
   players: unknown[];
-  flopCards: Card[] | null;
-  turnCard: Card | null;
-  riverCard: Card | null;
+  flopCards: unknown[] | null;
+  turnCard: unknown | null;
+  riverCard: unknown | null;
   streets: unknown;
   pots: unknown[];
   sawFlop: string[];
@@ -66,12 +64,20 @@ export default async function handler(request: VercelRequest, response: VercelRe
         saw_flop, went_to_showdown, voluntary_put_in_pot,
         players, streets, pots
       ) VALUES (
-        ${hand.handId}, ${sessionId}, ${hand.handNumber}, ${hand.timestamp}, ${hand.buttonSeatIndex},
-        ${hand.flopCards ? JSON.stringify(hand.flopCards) : null},
-        ${hand.turnCard  ? JSON.stringify(hand.turnCard)  : null},
-        ${hand.riverCard ? JSON.stringify(hand.riverCard) : null},
-        ${hand.sawFlop}, ${hand.wentToShowdown}, ${hand.voluntaryPutInPot},
-        ${JSON.stringify(hand.players)}, ${JSON.stringify(hand.streets)}, ${JSON.stringify(hand.pots)}
+        ${hand.handId},
+        ${sessionId},
+        ${hand.handNumber},
+        ${hand.timestamp},
+        ${hand.buttonSeatIndex},
+        ${hand.flopCards ?? null},
+        ${hand.turnCard  ?? null},
+        ${hand.riverCard ?? null},
+        ${JSON.stringify(hand.sawFlop)},
+        ${JSON.stringify(hand.wentToShowdown)},
+        ${JSON.stringify(hand.voluntaryPutInPot)},
+        ${JSON.stringify(hand.players)},
+        ${JSON.stringify(hand.streets)},
+        ${JSON.stringify(hand.pots)}
       )
       ON CONFLICT (hand_id) DO NOTHING
     `;
