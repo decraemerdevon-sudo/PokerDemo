@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { Pool } from '@neondatabase/serverless';
 
 type HandRecord = {
   handId: string;
@@ -40,6 +40,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return;
   }
 
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    response.status(500).json({ error: 'DATABASE_URL not set' });
+    return;
+  }
+
   const payload = parsePayload(request.body);
   if (!payload?.sessionId || !payload?.hand?.handId) {
     response.status(400).json({ error: 'invalid_payload' });
@@ -47,44 +53,45 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   const { sessionId, hand } = payload;
+  const pool = new Pool({ connectionString: url });
 
   try {
-    const sql = getDb();
+    await pool.query(
+      `INSERT INTO sessions (session_id) VALUES ($1) ON CONFLICT (session_id) DO NOTHING`,
+      [sessionId]
+    );
 
-    await sql`
-      INSERT INTO sessions (session_id)
-      VALUES (${sessionId})
-      ON CONFLICT (session_id) DO NOTHING
-    `;
-
-    await sql`
-      INSERT INTO hands (
+    await pool.query(
+      `INSERT INTO hands (
         hand_id, session_id, hand_number, timestamp, button_seat_index,
         flop_cards, turn_card, river_card,
         saw_flop, went_to_showdown, voluntary_put_in_pot,
         players, streets, pots
-      ) VALUES (
-        ${hand.handId},
-        ${sessionId},
-        ${hand.handNumber},
-        ${hand.timestamp},
-        ${hand.buttonSeatIndex},
-        ${hand.flopCards ?? null},
-        ${hand.turnCard  ?? null},
-        ${hand.riverCard ?? null},
-        ${JSON.stringify(hand.sawFlop)},
-        ${JSON.stringify(hand.wentToShowdown)},
-        ${JSON.stringify(hand.voluntaryPutInPot)},
-        ${JSON.stringify(hand.players)},
-        ${JSON.stringify(hand.streets)},
-        ${JSON.stringify(hand.pots)}
-      )
-      ON CONFLICT (hand_id) DO NOTHING
-    `;
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      ON CONFLICT (hand_id) DO NOTHING`,
+      [
+        hand.handId,
+        sessionId,
+        hand.handNumber,
+        hand.timestamp,
+        hand.buttonSeatIndex,
+        hand.flopCards  ? JSON.stringify(hand.flopCards)  : null,
+        hand.turnCard   ? JSON.stringify(hand.turnCard)   : null,
+        hand.riverCard  ? JSON.stringify(hand.riverCard)  : null,
+        JSON.stringify(hand.sawFlop),
+        JSON.stringify(hand.wentToShowdown),
+        JSON.stringify(hand.voluntaryPutInPot),
+        JSON.stringify(hand.players),
+        JSON.stringify(hand.streets),
+        JSON.stringify(hand.pots),
+      ]
+    );
 
     response.status(201).json({ ok: true, handId: hand.handId });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';
     response.status(500).json({ error: 'db_write_failed', message });
+  } finally {
+    await pool.end();
   }
 }
