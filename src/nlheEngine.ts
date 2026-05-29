@@ -236,6 +236,9 @@ export function syncTableFromHand(table: TableState, hand: HandState): TableStat
     ...table,
     seats: table.seats.map((seat) => {
       const chips = stacksBySeatIndex.get(seat.seatIndex) ?? seat.chips;
+      if (!seat.isHero && chips <= 0) {
+        return { ...seat, playerId: null, name: 'Empty', chips: 0, isActive: false, style: undefined };
+      }
       return { ...seat, chips, isActive: seat.isActive && chips > 0 };
     }),
   };
