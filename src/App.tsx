@@ -23,8 +23,8 @@ import {
   visibleBoard,
 } from './nlheEngine';
 import { getSeatPosition, seatAngleForIndex } from './seatGeometry';
-import { trackHandHistoryEvent } from './handHistoryAnalytics';
-import { appendCompletedHand, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
+import { persistCompletedHand, trackHandHistoryEvent } from './handHistoryAnalytics';
+import { appendCompletedHand, buildHandRecord, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
 type TableMode = 'play' | 'review';
 type ChipDenomination = {
@@ -454,6 +454,7 @@ function App() {
   const [customBetFlash, setCustomBetFlash] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<RecoveryNotice | null>(null);
   const customBetRef = useRef<HTMLDivElement | null>(null);
+  const persistedHandIds = useRef(new Set<string>());
 
   const board = visibleBoard(state);
   const pot = potSize(state);
@@ -512,6 +513,10 @@ function App() {
 
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
+    if (!persistedHandIds.current.has(state.handId)) {
+      persistedHandIds.current.add(state.handId);
+      persistCompletedHand(buildHandRecord(state));
+    }
     setSessionHistory((current) => {
       const next = appendCompletedHand(current, state);
       setSelectedHandId((selected) => selected ?? next[0]?.handId ?? null);

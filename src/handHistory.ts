@@ -141,15 +141,14 @@ export function saveSessionHistory(records: HandRecord[]) {
   window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
-export function appendCompletedHand(history: HandRecord[], state: HandState): HandRecord[] {
-  if (history.some((record) => record.handId === state.handId)) return history;
+export function buildHandRecord(state: HandState): HandRecord {
   const events = state.events;
   const showdown = isShowdown(state);
   const wentToShowdown = showdown ? state.seats.filter((seat) => seat.status !== 'folded').map((seat) => seat.id) : [];
   const sawFlop = state.board.length >= 3 ? state.seats.filter((seat) => foldedStreetFor(seat.id, events) !== 'preflop').map((seat) => seat.id) : [];
   const preflopPutIn = new Set(actionEvents(events).filter(playerPutChipsInPreflop).map((event) => event.playerId!));
 
-  const record: HandRecord = {
+  return {
     handId: state.handId,
     handNumber: state.handNumber,
     timestamp: Date.now(),
@@ -185,7 +184,11 @@ export function appendCompletedHand(history: HandRecord[], state: HandState): Ha
     wentToShowdown,
     voluntaryPutInPot: Array.from(preflopPutIn),
   };
+}
 
+export function appendCompletedHand(history: HandRecord[], state: HandState): HandRecord[] {
+  if (history.some((record) => record.handId === state.handId)) return history;
+  const record = buildHandRecord(state);
   const next = [record, ...history];
   saveSessionHistory(next);
   return next;

@@ -1,3 +1,5 @@
+import type { HandRecord } from './handHistory';
+
 export type HandHistoryAnalyticsEvent = {
   id: string;
   handId: string;
@@ -34,6 +36,18 @@ function createEvent(input: TrackInput): HandHistoryAnalyticsEvent {
     handId: input.handId ?? 'demo-hand',
     occurredAt: input.occurredAt ?? new Date().toISOString(),
   };
+}
+
+export function persistCompletedHand(record: HandRecord) {
+  const payload = JSON.stringify({ sessionId: getSessionId(), hand: record });
+  void fetch('/api/hand-history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+    keepalive: true,
+  }).catch(() => {
+    // Persistence must never block gameplay.
+  });
 }
 
 export function trackHandHistoryEvent(input: TrackInput) {
