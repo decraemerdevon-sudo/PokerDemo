@@ -22,6 +22,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     await pool.query(`
       CREATE TABLE sessions (
         session_id TEXT PRIMARY KEY,
+        player_id  TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -29,6 +30,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       CREATE TABLE hands (
         hand_id              TEXT PRIMARY KEY,
         session_id           TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+        player_id            TEXT NOT NULL,
         hand_number          INTEGER NOT NULL,
         timestamp            BIGINT NOT NULL,
         button_seat_index    INTEGER NOT NULL,
@@ -45,6 +47,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       )
     `);
     await pool.query(`CREATE INDEX hands_session_id_idx ON hands(session_id)`);
+    await pool.query(`CREATE INDEX hands_player_id_idx  ON hands(player_id)`);
     await pool.query(`CREATE INDEX hands_timestamp_idx  ON hands(timestamp DESC)`);
     response.status(200).json({ ok: true, message: 'Schema applied successfully' });
   } catch (err) {

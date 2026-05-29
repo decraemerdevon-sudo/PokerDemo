@@ -23,7 +23,7 @@ import {
   visibleBoard,
 } from './nlheEngine';
 import { getSeatPosition, seatAngleForIndex } from './seatGeometry';
-import { getSessionId, persistCompletedHand, trackHandHistoryEvent } from './handHistoryAnalytics';
+import { getPlayerId, persistCompletedHand, trackHandHistoryEvent } from './handHistoryAnalytics';
 import { appendCompletedHand, buildHandRecord, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
 type TableMode = 'play' | 'review';
@@ -467,8 +467,8 @@ function App() {
   const [historyView, setHistoryView] = useState<'session' | 'all'>('session');
 
   useEffect(() => {
-    const sessionId = getSessionId();
-    fetch(`/api/hands?sessionId=${encodeURIComponent(sessionId)}`)
+    const playerId = getPlayerId();
+    fetch(`/api/hands?playerId=${encodeURIComponent(playerId)}`)
       .then((r) => r.json())
       .then((data: { hands?: HandRecord[] }) => {
         if (!Array.isArray(data.hands) || data.hands.length === 0) return;
