@@ -569,6 +569,7 @@ dd {
 }
 
 .rebuy-actions {
+  align-items: start;
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -588,6 +589,74 @@ dd {
 .rebuy-secondary {
   background: #274a67;
   color: #fffaf1;
+}
+
+.addon-section {
+  display: grid;
+  gap: 6px;
+}
+
+.addon-section .rebuy-secondary {
+  width: 100%;
+}
+
+.addon-slider {
+  accent-color: #274a67;
+  width: 100%;
+}
+
+.addon-slider:disabled {
+  opacity: 0.4;
+}
+
+.addon-range-labels {
+  color: #676151;
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 800;
+  justify-content: space-between;
+}
+
+.rebuy-modal-overlay {
+  align-items: center;
+  background: rgba(15, 11, 5, 0.72);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 200;
+}
+
+.rebuy-modal {
+  background: #fffdf9;
+  border: 1px solid #d6cbb8;
+  border-radius: 16px;
+  box-shadow: 0 24px 56px rgba(15, 11, 5, 0.36);
+  display: grid;
+  gap: 16px;
+  max-width: 380px;
+  padding: 32px;
+  text-align: center;
+  width: 90%;
+}
+
+.rebuy-modal h2 {
+  margin: 0;
+}
+
+.rebuy-modal-sub {
+  color: #676151;
+  margin: 0;
+}
+
+.rebuy-modal-btn {
+  font-size: 1.05rem;
+  font-weight: 900;
+  min-height: 52px;
+  width: 100%;
 }
 
 .action-grid {
