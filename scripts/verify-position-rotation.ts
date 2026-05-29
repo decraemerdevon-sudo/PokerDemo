@@ -15,6 +15,35 @@ function sync(table: TableState, hand: ReturnType<typeof createHand>) {
   table.seats = nextTable.seats;
 }
 
+const defaultTable = createInitialTable();
+assert(defaultTable.seats.length === 6, `default table should be six-handed, got ${defaultTable.seats.length}`);
+const defaultHand = createHand(defaultTable);
+assert(defaultHand.seats.length === 6, `default hand should deal six active seats, got ${defaultHand.seats.length}`);
+assert(seatForRole(defaultHand, 'BTN') !== undefined, 'six-handed hand should assign a button');
+assert(seatForRole(defaultHand, 'SB') !== undefined, 'six-handed hand should assign a small blind');
+assert(seatForRole(defaultHand, 'BB') !== undefined, 'six-handed hand should assign a big blind');
+assert(seatForRole(defaultHand, 'UTG') !== undefined, 'six-handed hand should assign UTG');
+assert(seatForRole(defaultHand, 'MP') !== undefined, 'six-handed hand should assign MP');
+assert(seatForRole(defaultHand, 'CO') !== undefined, 'six-handed hand should assign CO');
+
+const botRemovalTable = createInitialTable([
+  { seatIndex: 0, playerId: 'hero', name: 'Hero', chips: 1000, isActive: true, isHero: true },
+  { seatIndex: 1, playerId: 'busted-bot', name: 'Busted Bot', chips: 1000, isActive: true },
+  { seatIndex: 2, playerId: 'live-bot', name: 'Live Bot', chips: 1000, isActive: true },
+  { seatIndex: 3, playerId: null, name: 'Empty 3', chips: 0, isActive: false },
+  { seatIndex: 4, playerId: null, name: 'Empty 4', chips: 0, isActive: false },
+  { seatIndex: 5, playerId: null, name: 'Empty 5', chips: 0, isActive: false },
+]);
+const botRemovalHand = createHand(botRemovalTable);
+const botRemovalSynced = syncTableFromHand(botRemovalTable, {
+  ...botRemovalHand,
+  seats: botRemovalHand.seats.map((seat) => seat.id === 'busted-bot' ? { ...seat, stack: 0 } : seat),
+});
+assert(botRemovalSynced.seats.length === 6, 'bot removal should preserve six physical table seats');
+assert(botRemovalSynced.seats[1].playerId === null, 'busted bot seat should become empty');
+assert(botRemovalSynced.seats[1].isActive === false, 'busted bot seat should be inactive');
+assert(botRemovalSynced.seats[0].playerId === 'hero', 'hero seat should remain occupied');
+
 const table = createInitialTable([
   { seatIndex: 0, playerId: 'seat-0', name: 'Seat 0', chips: 1000, isActive: true },
   { seatIndex: 1, playerId: null, name: 'Empty 1', chips: 0, isActive: false },

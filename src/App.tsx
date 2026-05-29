@@ -472,7 +472,8 @@ function App() {
   }, [customBetAction, hero.stack, hero.streetContribution, state.bigBlind]);
   const replayEvents = useMemo(() => state.events.filter(isUserFacingReplayEvent), [state.events]);
   const activePlayers = state.seats.filter((seat) => seat.status === 'active' || seat.status === 'all-in');
-  const occupiedSeatIndices = state.seats.map((seat) => seat.seatIndex);
+  const tableSeatCount = tableState.table.seats.length;
+  const occupiedSeatIndices = tableState.table.seats.filter((seat) => seat.playerId && seat.isActive && seat.chips > 0).map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
@@ -671,14 +672,14 @@ function App() {
             <div className="pot-chip-area">
               <ChipStacksView amount={pot} label="Pot" size="pot" />
             </div>
-            {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, state.seats.length)} />)}
+            {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, tableSeatCount)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
               <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
-              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, state.seats.length), { x: 50, y: 50 }, 32);
+              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, tableSeatCount), { x: 50, y: 50 }, 32);
               return (
                 <SeatView
                   isButton={seat.seatIndex === state.buttonSeatIndex}
