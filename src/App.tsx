@@ -317,7 +317,7 @@ function HandHistoryPanel({
       </header>
       <div className="hand-history-content">
         <section className="session-stats" aria-labelledby="session-stats-title">
-          <h3 id="session-stats-title">Session Stats</h3>
+          <h3 id="session-stats-title">{historyView === 'session' ? 'Session Stats' : 'All-Time Stats'}</h3>
           <div className="stats-table" role="table" aria-label="Session statistics">
             <div className="stats-row stats-head" role="row"><span>Player</span><span>VPIP</span><span>PFR</span><span>Net</span></div>
             {stats.map((stat) => (
@@ -446,6 +446,8 @@ function sourceForAnalytics(event: HandEvent) {
 function App() {
   const [tableState, setTableState] = useState(() => {
     const table = createInitialTable();
+    const savedHandNumber = parseInt(window.sessionStorage.getItem('poker-demo-hand-number') || '0', 10);
+    if (savedHandNumber > 0) table.handNumber = savedHandNumber;
     const next = createNextHand(table);
     if (!next) throw new Error('Unable to start table with fewer than two active players');
     return next;
@@ -544,6 +546,7 @@ function App() {
 
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
+    window.sessionStorage.setItem('poker-demo-hand-number', String(state.handNumber));
     if (!persistedHandIds.current.has(state.handId)) {
       persistedHandIds.current.add(state.handId);
       currentRunHandIds.current.add(state.handId);
