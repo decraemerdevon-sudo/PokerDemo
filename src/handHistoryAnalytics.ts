@@ -19,17 +19,27 @@ type TrackInput = Omit<HandHistoryAnalyticsEvent, 'id' | 'handId' | 'occurredAt'
 
 const ANALYTICS_ENDPOINT = '';
 
-// Fresh on every page load — module-level so it never persists across loads.
-// Ensures hand-1 from one load never collides with hand-1 from another in the DB.
+// Fresh on every page load — makes DB hand IDs unique per load.
 const RUN_ID = window.crypto?.randomUUID?.() ?? `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-// Persistent across browser sessions — identifies the player until auth is added.
-export function getSessionId() {
-  const key = 'poker-demo-session-id';
+// Permanent player identifier — survives tab close, browser restart, forever.
+// Replaced by a real user ID once Clerk auth is added.
+export function getPlayerId(): string {
+  const key = 'poker-demo-player-id';
   const existing = window.localStorage.getItem(key);
   if (existing) return existing;
-  const next = window.crypto?.randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const next = window.crypto?.randomUUID?.() ?? `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   window.localStorage.setItem(key, next);
+  return next;
+}
+
+// Per-tab session identifier — resets when the tab is closed.
+export function getSessionId(): string {
+  const key = 'poker-demo-session-id';
+  const existing = window.sessionStorage.getItem(key);
+  if (existing) return existing;
+  const next = window.crypto?.randomUUID?.() ?? `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.sessionStorage.setItem(key, next);
   return next;
 }
 
@@ -43,11 +53,10 @@ function createEvent(input: TrackInput): HandHistoryAnalyticsEvent {
 }
 
 export function persistCompletedHand(record: HandRecord) {
-  const sessionId = getSessionId();
-  const dbHandId = `${RUN_ID}:${record.handId}`;
   const payload = JSON.stringify({
-    sessionId,
-    hand: { ...record, handId: dbHandId },
+    playerId: getPlayerId(),
+    sessionId: getSessionId(),
+    hand: { ...record, handId: `${RUN_ID}:${record.handId}` },
   });
   void fetch('/api/hand-history', {
     method: 'POST',
