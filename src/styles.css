@@ -192,21 +192,17 @@ h3 {
   z-index: 2;
 }
 
-.pot-chip-area,
 .player-bet-chips {
   pointer-events: none;
   position: absolute;
   transform: translate(-50%, -50%);
+  transition: left 180ms ease, top 180ms ease;
   z-index: 3;
 }
 
-.pot-chip-area {
-  left: 50%;
-  top: calc(50% + 90px);
-}
-
-.player-bet-chips {
-  transition: left 180ms ease, top 180ms ease;
+.board-pot {
+  display: flex;
+  justify-content: center;
 }
 
 .chip-display {
@@ -483,14 +479,6 @@ dd {
   font-size: 1.12rem;
 }
 
-.suit-code {
-  bottom: 4px;
-  color: #4f5149;
-  font-size: 0.62rem;
-  font-weight: 900;
-  position: absolute;
-  right: 5px;
-}
 
 .action-panel {
   align-items: center;
