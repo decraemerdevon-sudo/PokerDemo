@@ -8,41 +8,72 @@ Target experience is comparable to major online poker software (PokerStars,
 GGPoker) in feel and correctness. Single-player vs bots for now, with a
 roadmap toward multiplayer and advanced training features.
 
-## Current State
+## Current State (as of 2026-05-29)
 - Functional 6-handed NLHE table with bot opponents
-- Hand history tracked per session (lost on tab close — no DB yet)
-- Session stats: VPIP, PFR, 3-bet, aggression factor, bb/100
-- Stub analytics API endpoint (returns 202, no persistence)
-- No authentication, no database, no coaching agent yet
+- Neon Postgres wired up — hands persist across tab closes and browser sessions
+- Session identity: playerId (localStorage, permanent) + sessionId (sessionStorage,
+  per-tab) + RUN_ID (module-level constant, per page load)
+- DB handIds are namespaced: `${RUN_ID}:${localHandId}` to avoid ON CONFLICT
+- Hand history panel: "This Session" / "All Sessions" toggle
+  - This Session = hands from current page load only (currentRunHandIds ref)
+  - All Sessions = all hands for this playerId from the database
+- Session stats (VPIP, PFR, 3-bet, AF, CBet, WTSD, WSD, bb/100) update per view
+- Suit symbols display correctly: ♠ ♥ ♦ ♣ (Unicode)
+- Seat positions run clockwise: hero (bottom), SB (lower-left), BB (upper-left),
+  UTG (top), HJ (upper-right), CO (lower-right)
+- Bet chips positioned between each seat and the pot (no panel overlap)
+- Rebuy modal: pops up as a centred overlay when hero's stack hits zero
+- Add-on: range slider lets player choose any amount from $100 to $1500
+- Bot bust recovery: autoRecoverBotSeats() auto-rebuys bots after every hand
+- Hand number persists across page refresh (via sessionStorage), resets on tab close
+- No authentication yet
 
 ## Tech Stack
 - Frontend: React 19 + TypeScript + Vite 7
 - Styling: Custom CSS (no framework)
 - Backend: Vercel Serverless Functions (api/)
-- Database: None yet — planned Neon Postgres via Vercel Marketplace
+- Database: Neon Postgres via @neondatabase/serverless (Pool, not neon tagged templates)
 - Auth: None yet — planned Clerk
 - Hosting: Vercel (primary) + GitHub Pages via GitHub Actions
 
 ## Key Files
-- src/nlheEngine.ts     — Core poker engine. Rules, hand logic, bot AI.
-                          Do not add UI logic here.
-- src/App.tsx           — Main React component. All game state lives here.
-                          797 lines — planned for component split.
-- src/handHistory.ts    — Session stats calculation and sessionStorage
-                          persistence. Will migrate to database.
-- src/styles.css        — All styling. No inline styles, no CSS framework.
-- api/hand-history.ts   — Vercel serverless endpoint. Currently a stub.
-                          Will become the database write layer.
+- src/nlheEngine.ts          — Core poker engine. Rules, hand logic, bot AI.
+                               Do not add UI logic here.
+- src/App.tsx                — Main React component. All game state lives here.
+                               ~870 lines — planned for component split.
+- src/handHistory.ts         — Session stats calculation. buildHandRecord() is
+                               exported for use in App.tsx.
+- src/handHistoryAnalytics.ts — playerId / sessionId management, RUN_ID
+                               constant, persistCompletedHand() fire-and-forget.
+- src/seatGeometry.ts        — Angle-based seat positioning for the felt layout.
+- src/styles.css             — All styling. No inline styles, no CSS framework.
+- api/hand-history.ts        — POST endpoint. Writes session + hand to Neon.
+- api/hands.ts               — GET endpoint. Reads last 200 hands by playerId.
+- api/migrate.ts             — POST endpoint. Drops and recreates DB schema.
+                               Run once via Hoppscotch / curl after deploy.
+
+## Database Schema
+Two tables: sessions (session_id PK, player_id, created_at) and
+hands (hand_id PK, session_id FK, player_id, hand_number, timestamp, ...,
+flop_cards JSONB, turn_card JSONB, river_card JSONB,
+saw_flop JSONB, went_to_showdown JSONB, voluntary_put_in_pot JSONB,
+players JSONB, streets JSONB, pots JSONB).
+
+All API endpoints use Pool from @neondatabase/serverless with $1..$N
+parameterized queries. The neon() tagged template client crashes in Vercel
+serverless — do NOT use it.
 
 ## Architecture Rules
 - Keep engine logic in nlheEngine.ts, UI logic in App.tsx — never mix
 - All game state updates must be immutable (no direct mutation)
 - Hand history data flows: game engine → handHistory.ts → API endpoint → DB
 - Bot decisions belong in nlheEngine.ts, not in React components
+- New persistence always goes through the API to the database —
+  never localStorage or sessionStorage for hand/session data
 
 ## Roadmap (in priority order)
-1. Neon Postgres — wire up api/hand-history.ts to persist hand data
-2. Clerk Auth — user identity so history survives across sessions/devices
+1. ~~Neon Postgres~~ DONE — hands persist via api/hand-history.ts + api/hands.ts
+2. Clerk Auth — user identity so history survives across devices and browsers
 3. Coaching Agent — Claude API integration, persistent side panel chat
 4. App.tsx component split — extract SeatView, BoardView, ActionPanel etc.
 5. Vitest — replace raw assertion scripts with a proper test framework
@@ -91,8 +122,10 @@ to minimise perceived delay. Show a subtle "thinking..." indicator per seat.
 
 ## What Not To Do
 - Do not add UI logic to nlheEngine.ts
-- Do not use localStorage or sessionStorage for new features —
-  new persistence goes through the API to the database
+- Do not use localStorage or sessionStorage for new persistence —
+  new data goes through the API to the database
+- Do not use the neon() tagged template client in serverless functions —
+  use Pool with parameterized queries instead
 - Do not introduce a CSS framework without discussion
 - Do not add authentication logic client-side — auth belongs on the backend
 - Do not hard-code bot ranges — strategy logic belongs in nlheEngine.ts

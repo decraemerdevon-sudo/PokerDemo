@@ -58,8 +58,8 @@ const CHIP_DENOMINATIONS: ChipDenomination[] = [
   { value: 5, color: '#CC0000', borderColor: '#8B0000', label: '5' },
   { value: 1, color: '#F5F5F5', borderColor: '#AAAAAA', label: '1' },
 ];
-const suitLabels: Record<Card['suit'], string> = { spades: 'S', hearts: 'H', diamonds: 'D', clubs: 'C' };
-const suitSymbols: Record<Card['suit'], string> = { spades: '?', hearts: '?', diamonds: '?', clubs: '?' };
+const suitLabels: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+const suitSymbols: Record<Card['suit'], string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
 const suitClasses: Record<Card['suit'], string> = {
   spades: 'card-spade',
   hearts: 'card-heart',
@@ -89,7 +89,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 }
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
-  const chipOffset = seatRadius * 0.38;
+  const chipOffset = seatRadius * 0.48;
   return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
@@ -264,7 +264,7 @@ function PlayerBetChips({ seat, seatAngle }: { seat: Seat; seatAngle: number }) 
   const position = getChipPosition(seatAngle, { x: 50, y: 50 }, 50);
   return (
     <div className="player-bet-chips" style={{ left: `${position.x}%`, top: `${position.y}%` }}>
-      <ChipStacksView amount={seat.streetContribution} label={seat.name} />
+      <ChipStacksView amount={seat.streetContribution} />
     </div>
   );
 }
@@ -398,24 +398,46 @@ function HandHistoryPanel({
   );
 }
 
+function RebuyModal({ onRebuy }: { onRebuy: () => void }) {
+  return (
+    <div className="rebuy-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="rebuy-modal-title">
+      <div className="rebuy-modal">
+        <p className="eyebrow">Bankroll</p>
+        <h2 id="rebuy-modal-title">You're out of chips</h2>
+        <p className="rebuy-modal-sub">Your stack hit zero. Rebuy to keep playing.</p>
+        <button className="rebuy-primary rebuy-modal-btn" onClick={onRebuy} type="button">
+          Rebuy {formatMoney(DEFAULT_BUY_IN)}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RebuyPanel({
   canAddOn,
   canRebuy,
   heroStack,
   playableSeats,
   notice,
+  addOnAmount,
   onAddOn,
   onRebuy,
+  onAddOnAmountChange,
 }: {
   canAddOn: boolean;
   canRebuy: boolean;
   heroStack: number;
   playableSeats: number;
   notice: RecoveryNotice | null;
+  addOnAmount: number;
   onAddOn: () => void;
   onRebuy: () => void;
+  onAddOnAmountChange: (amount: number) => void;
 }) {
   const heroBusted = heroStack <= 0;
+  const minAddOn = 100;
+  const maxAddOn = DEFAULT_BUY_IN;
+  const addOnDisabled = !canAddOn || heroBusted;
   return (
     <section className="rebuy-panel" aria-labelledby="rebuy-title">
       <div>
@@ -429,7 +451,21 @@ function RebuyPanel({
       {notice && <p className={`rebuy-notice rebuy-notice-${notice.tone}`} role="status">{notice.message}</p>}
       <div className="rebuy-actions">
         <button className="rebuy-primary" disabled={!canRebuy || !heroBusted} onClick={onRebuy} type="button">Rebuy {formatMoney(DEFAULT_BUY_IN)}</button>
-        <button className="rebuy-secondary" disabled={!canAddOn || heroBusted} onClick={onAddOn} type="button">Add-on {formatMoney(Math.floor(DEFAULT_BUY_IN / 2))}</button>
+        <div className="addon-section">
+          <button className="rebuy-secondary" disabled={addOnDisabled} onClick={onAddOn} type="button">Add-on {formatMoney(addOnAmount)}</button>
+          <input
+            aria-label="Add-on amount"
+            className="addon-slider"
+            disabled={addOnDisabled}
+            max={maxAddOn}
+            min={minAddOn}
+            onChange={(e) => onAddOnAmountChange(Number(e.target.value))}
+            step={50}
+            type="range"
+            value={addOnAmount}
+          />
+          <div className="addon-range-labels"><span>{formatMoney(minAddOn)}</span><span>{formatMoney(maxAddOn)}</span></div>
+        </div>
       </div>
     </section>
   );
@@ -467,6 +503,8 @@ function App() {
   const persistedHandIds = useRef(new Set<string>());
   const currentRunHandIds = useRef(new Set<string>());
   const [historyView, setHistoryView] = useState<'session' | 'all'>('session');
+  const [addOnAmount, setAddOnAmount] = useState(Math.floor(DEFAULT_BUY_IN / 2));
+  const [rebuyModalOpen, setRebuyModalOpen] = useState(false);
 
   useEffect(() => {
     const playerId = getPlayerId();
@@ -562,7 +600,7 @@ function App() {
         const syncedTable = autoRecoverBotSeats(syncTableFromHand(current.table, current.hand));
         const heroSeat = syncedTable.seats.find((seat) => seat.isHero);
         if (heroSeat && heroSeat.chips <= 0) {
-          setRecoveryNotice({ tone: 'warning', message: 'You are out of chips. Rebuy to keep the session running.' });
+          setRebuyModalOpen(true);
           return { ...current, table: syncedTable };
         }
         const next = createNextHand(syncedTable);
@@ -631,7 +669,8 @@ function App() {
       if (!next) return current;
       return next;
     });
-    setRecoveryNotice({ tone: 'info', message: `${formatMoney(DEFAULT_BUY_IN)} rebuy posted. Next hand is live.` });
+    setRebuyModalOpen(false);
+    setRecoveryNotice(null);
     setSelectedEvent(0);
     setMode('play');
   };
@@ -640,10 +679,10 @@ function App() {
     setTableState((current) => {
       if (current.hand.stage !== 'hand-complete') return current;
       const syncedTable = syncTableFromHand(current.table, current.hand);
-      const toppedUp = addChipsToSeat(syncedTable, hero.id, Math.floor(DEFAULT_BUY_IN / 2));
+      const toppedUp = addChipsToSeat(syncedTable, hero.id, addOnAmount);
       return startRecoveredHand(toppedUp, current.hand);
     });
-    setRecoveryNotice({ tone: 'info', message: `${formatMoney(Math.floor(DEFAULT_BUY_IN / 2))} add-on posted before the next hand.` });
+    setRecoveryNotice({ tone: 'info', message: `${formatMoney(addOnAmount)} add-on posted before the next hand.` });
     setSelectedEvent(0);
     setMode('play');
   };
@@ -710,13 +749,13 @@ function App() {
           </div>
           <div className="felt" aria-label="Poker table">
             <div className="pot-chip-area">
-              <ChipStacksView amount={pot} label="Pot" size="pot" />
+              <ChipStacksView amount={pot} size="pot" />
             </div>
             {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, tableSeatCount)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
-              <dl className="pot-summary"><div><dt>Pot</dt><dd>{formatMoney(pot)}</dd></div><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
+              <dl className="pot-summary"><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
               const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, tableSeatCount), { x: 50, y: 50 }, 32);
@@ -797,11 +836,13 @@ function App() {
           </div>
         </section>
         <RebuyPanel
+          addOnAmount={addOnAmount}
           canAddOn={state.stage === 'hand-complete' && tableHeroStack > 0}
           canRebuy={state.stage === 'hand-complete' && tableHeroStack <= 0}
           heroStack={state.stage === 'hand-complete' ? tableHeroStack : hero.stack}
           notice={recoveryNotice}
           onAddOn={addOnHero}
+          onAddOnAmountChange={setAddOnAmount}
           onRebuy={rebuyHero}
           playableSeats={playableSeats}
         />
@@ -830,6 +871,7 @@ function App() {
         </section>
       </aside>
       {handHistoryOpen && <HandHistoryPanel history={visibleHistory} selectedHandId={selectedHandId} setSelectedHandId={setSelectedHandId} stats={sessionStats} historyView={historyView} onHistoryViewChange={setHistoryView} onClose={() => setHandHistoryOpen(false)} />}
+      {rebuyModalOpen && <RebuyModal onRebuy={rebuyHero} />}
     </main>
   );
 }
