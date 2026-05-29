@@ -290,12 +290,16 @@ function HandHistoryPanel({
   selectedHandId,
   setSelectedHandId,
   stats,
+  historyView,
+  onHistoryViewChange,
   onClose,
 }: {
   history: HandRecord[];
   selectedHandId: string | null;
   setSelectedHandId: (handId: string) => void;
   stats: PlayerSessionStats[];
+  historyView: 'session' | 'all';
+  onHistoryViewChange: (view: 'session' | 'all') => void;
   onClose: () => void;
 }) {
   const selected = history.find((hand) => hand.handId === selectedHandId) ?? history[0] ?? null;
@@ -304,7 +308,11 @@ function HandHistoryPanel({
   return (
     <aside className="hand-history-panel" aria-label="Hand history panel">
       <header className="hand-history-header">
-        <div><p className="eyebrow">Session</p><h2>Hand History</h2></div>
+        <div><p className="eyebrow">Hand History</p><h2>{historyView === 'session' ? 'This Session' : 'All Sessions'}</h2></div>
+        <div className="history-view-toggle" role="group" aria-label="History view">
+          <button type="button" className={historyView === 'session' ? 'active' : ''} onClick={() => onHistoryViewChange('session')} aria-pressed={historyView === 'session'}>This Session</button>
+          <button type="button" className={historyView === 'all' ? 'active' : ''} onClick={() => onHistoryViewChange('all')} aria-pressed={historyView === 'all'}>All Sessions</button>
+        </div>
         <button onClick={onClose} type="button" aria-label="Close hand history">Close</button>
       </header>
       <div className="hand-history-content">
@@ -455,6 +463,8 @@ function App() {
   const [recoveryNotice, setRecoveryNotice] = useState<RecoveryNotice | null>(null);
   const customBetRef = useRef<HTMLDivElement | null>(null);
   const persistedHandIds = useRef(new Set<string>());
+  const currentRunHandIds = useRef(new Set<string>());
+  const [historyView, setHistoryView] = useState<'session' | 'all'>('session');
 
   useEffect(() => {
     const sessionId = getSessionId();
@@ -494,7 +504,11 @@ function App() {
   const occupiedSeatIndices = tableState.table.seats.filter((seat) => seat.playerId && seat.isActive && seat.chips > 0).map((seat) => seat.seatIndex);
   const isHeroTurn = state.currentSeatId === hero.id && state.stage === 'awaiting-action';
   const modeLabel = state.stage === 'hand-complete' ? 'Showdown' : activeSeat?.isHero ? 'Player turn' : activeSeat ? 'Bot action' : 'Resolving';
-  const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, sessionHistory, state.bigBlind)), [sessionHistory, state.seats, state.bigBlind]);
+  const visibleHistory = useMemo(
+    () => historyView === 'session' ? sessionHistory.filter((h) => currentRunHandIds.current.has(h.handId)) : sessionHistory,
+    [historyView, sessionHistory]
+  );
+  const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, visibleHistory, state.bigBlind)), [visibleHistory, state.seats, state.bigBlind]);
   const coachAdvice = useMemo(() => buildCoachAdvice(state), [state]);
   const heroSessionInvested = HERO_INITIAL_BUY_IN;
 
@@ -532,6 +546,7 @@ function App() {
     if (state.stage !== 'hand-complete') return;
     if (!persistedHandIds.current.has(state.handId)) {
       persistedHandIds.current.add(state.handId);
+      currentRunHandIds.current.add(state.handId);
       persistCompletedHand(buildHandRecord(state));
     }
     setSessionHistory((current) => {
@@ -811,7 +826,7 @@ function App() {
           ) : <div className="empty-state"><strong>Empty history</strong><p>No hand events are selected for review.</p></div>}
         </section>
       </aside>
-      {handHistoryOpen && <HandHistoryPanel history={sessionHistory} selectedHandId={selectedHandId} setSelectedHandId={setSelectedHandId} stats={sessionStats} onClose={() => setHandHistoryOpen(false)} />}
+      {handHistoryOpen && <HandHistoryPanel history={visibleHistory} selectedHandId={selectedHandId} setSelectedHandId={setSelectedHandId} stats={sessionStats} historyView={historyView} onHistoryViewChange={setHistoryView} onClose={() => setHandHistoryOpen(false)} />}
     </main>
   );
 }

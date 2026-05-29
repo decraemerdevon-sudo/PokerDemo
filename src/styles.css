@@ -1054,6 +1054,29 @@ dd {
   padding: 0 12px;
 }
 
+.history-view-toggle {
+  display: flex;
+  gap: 2px;
+  background: #d6ccbc;
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.history-view-toggle button {
+  background: transparent;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  min-height: 30px;
+  padding: 0 10px;
+  transition: background 0.15s;
+}
+
+.history-view-toggle button.active {
+  background: #fff8ee;
+  color: #1a1409;
+}
+
 .hand-history-content {
   display: grid;
   grid-template-columns: 230px 250px minmax(0, 1fr);
