@@ -89,7 +89,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 }
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
-  const chipOffset = seatRadius * 0.48;
+  const chipOffset = seatRadius * 0.60;
   return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
@@ -131,7 +131,6 @@ function CardView({ card, hidden = false }: { card: Card; hidden?: boolean }) {
       <span className="card-rank">{hidden ? '?' : card.rank}</span>
       <span aria-hidden="true" className="card-suit">{hidden ? '?' : suitSymbols[card.suit]}</span>
       <span className="sr-only">{hidden ? 'hidden card' : `${card.rank} of ${card.suit}`}</span>
-      {!hidden && <span className="suit-code">{suitLabels[card.suit]}</span>}
     </span>
   );
 }
@@ -436,8 +435,8 @@ function RebuyPanel({
 }) {
   const heroBusted = heroStack <= 0;
   const minAddOn = 100;
-  const maxAddOn = DEFAULT_BUY_IN;
-  const addOnDisabled = !canAddOn || heroBusted;
+  const maxAddOn = Math.max(minAddOn, DEFAULT_BUY_IN - heroStack);
+  const clampedAddOn = Math.min(addOnAmount, maxAddOn);
   return (
     <section className="rebuy-panel" aria-labelledby="rebuy-title">
       <div>
@@ -452,17 +451,17 @@ function RebuyPanel({
       <div className="rebuy-actions">
         <button className="rebuy-primary" disabled={!canRebuy || !heroBusted} onClick={onRebuy} type="button">Rebuy {formatMoney(DEFAULT_BUY_IN)}</button>
         <div className="addon-section">
-          <button className="rebuy-secondary" disabled={addOnDisabled} onClick={onAddOn} type="button">Add-on {formatMoney(addOnAmount)}</button>
+          <button className="rebuy-secondary" disabled={!canAddOn} onClick={onAddOn} type="button">Add-on {formatMoney(clampedAddOn)}</button>
           <input
             aria-label="Add-on amount"
             className="addon-slider"
-            disabled={addOnDisabled}
+            disabled={!canAddOn}
             max={maxAddOn}
             min={minAddOn}
             onChange={(e) => onAddOnAmountChange(Number(e.target.value))}
             step={50}
             type="range"
-            value={addOnAmount}
+            value={clampedAddOn}
           />
           <div className="addon-range-labels"><span>{formatMoney(minAddOn)}</span><span>{formatMoney(maxAddOn)}</span></div>
         </div>
@@ -505,6 +504,7 @@ function App() {
   const [historyView, setHistoryView] = useState<'session' | 'all'>('session');
   const [addOnAmount, setAddOnAmount] = useState(Math.floor(DEFAULT_BUY_IN / 2));
   const [rebuyModalOpen, setRebuyModalOpen] = useState(false);
+  const [heroTotalInvested, setHeroTotalInvested] = useState(HERO_INITIAL_BUY_IN);
 
   useEffect(() => {
     const playerId = getPlayerId();
@@ -526,8 +526,6 @@ function App() {
   const board = visibleBoard(state);
   const pot = potSize(state);
   const hero = state.seats.find((seat) => seat.isHero)!;
-  const tableHero = tableState.table.seats.find((seat) => seat.isHero);
-  const tableHeroStack = tableHero?.chips ?? hero.stack;
   const playableSeats = playableSeatCount(tableState.table);
   const activeSeat = state.currentSeatId ? state.seats.find((seat) => seat.id === state.currentSeatId) : undefined;
   const legalActions = useMemo(() => getLegalActions(state, hero.id), [state, hero.id]);
@@ -550,7 +548,6 @@ function App() {
   );
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, visibleHistory, state.bigBlind)), [visibleHistory, state.seats, state.bigBlind]);
   const coachAdvice = useMemo(() => buildCoachAdvice(state), [state]);
-  const heroSessionInvested = HERO_INITIAL_BUY_IN;
 
   useEffect(() => {
     const last = state.events[state.events.length - 1];
@@ -619,6 +616,12 @@ function App() {
   }, [state.stage]);
 
   useEffect(() => {
+    if (state.stage !== 'hand-complete') return;
+    const fillAmount = DEFAULT_BUY_IN - hero.stack;
+    if (fillAmount > 0) setAddOnAmount(fillAmount);
+  }, [state.stage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!customBet.isOpen || !customBetLimits) return;
     setCustomBet((current) => ({
       ...current,
@@ -669,6 +672,7 @@ function App() {
       if (!next) return current;
       return next;
     });
+    setHeroTotalInvested((current) => current + DEFAULT_BUY_IN);
     setRebuyModalOpen(false);
     setRecoveryNotice(null);
     setSelectedEvent(0);
@@ -676,13 +680,15 @@ function App() {
   };
 
   const addOnHero = () => {
+    const effectiveAmount = Math.min(addOnAmount, DEFAULT_BUY_IN - hero.stack);
     setTableState((current) => {
       if (current.hand.stage !== 'hand-complete') return current;
       const syncedTable = syncTableFromHand(current.table, current.hand);
-      const toppedUp = addChipsToSeat(syncedTable, hero.id, addOnAmount);
+      const toppedUp = addChipsToSeat(syncedTable, hero.id, effectiveAmount);
       return startRecoveredHand(toppedUp, current.hand);
     });
-    setRecoveryNotice({ tone: 'info', message: `${formatMoney(addOnAmount)} add-on posted before the next hand.` });
+    setHeroTotalInvested((current) => current + effectiveAmount);
+    setRecoveryNotice({ tone: 'info', message: `${formatMoney(effectiveAmount)} add-on posted before the next hand.` });
     setSelectedEvent(0);
     setMode('play');
   };
@@ -748,13 +754,11 @@ function App() {
             <p>{state.message}</p>
           </div>
           <div className="felt" aria-label="Poker table">
-            <div className="pot-chip-area">
-              <ChipStacksView amount={pot} size="pot" />
-            </div>
             {state.seats.map((seat) => <PlayerBetChips key={`${seat.id}-chips`} seat={seat} seatAngle={seatAngleForIndex(seat.seatIndex, tableSeatCount)} />)}
             <div className="board">
               <p>Board</p>
               <div className="board-cards">{state.board.map((card, index) => <CardView key={`${card.rank}-${card.suit}`} card={card} hidden={index >= board.length && state.stage !== 'hand-complete'} />)}</div>
+              <div className="board-pot"><ChipStacksView amount={pot} size="pot" /></div>
               <dl className="pot-summary"><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
@@ -778,7 +782,7 @@ function App() {
           <div className="betting-controls" ref={customBetRef}>
             <dl className="session-investment" aria-label="Session investment">
               <div><dt>Current hand pot</dt><dd>{formatMoney(pot)}</dd></div>
-              <div><dt>Your session invested</dt><dd>{formatMoney(heroSessionInvested)}</dd></div>
+              <div><dt>Your session invested</dt><dd>{formatMoney(heroTotalInvested)}</dd></div>
             </dl>
             {customBet.isOpen && customBetLimits && (
               <div className="custom-bet-panel" role="dialog" aria-labelledby="custom-bet-title">
@@ -837,9 +841,9 @@ function App() {
         </section>
         <RebuyPanel
           addOnAmount={addOnAmount}
-          canAddOn={state.stage === 'hand-complete' && tableHeroStack > 0}
-          canRebuy={state.stage === 'hand-complete' && tableHeroStack <= 0}
-          heroStack={state.stage === 'hand-complete' ? tableHeroStack : hero.stack}
+          canAddOn={state.stage === 'hand-complete' && hero.stack < DEFAULT_BUY_IN}
+          canRebuy={state.stage === 'hand-complete' && hero.stack <= 0}
+          heroStack={hero.stack}
           notice={recoveryNotice}
           onAddOn={addOnHero}
           onAddOnAmountChange={setAddOnAmount}
