@@ -23,7 +23,7 @@ import {
   visibleBoard,
 } from './nlheEngine';
 import { getSeatPosition, seatAngleForIndex } from './seatGeometry';
-import { persistCompletedHand, trackHandHistoryEvent } from './handHistoryAnalytics';
+import { getSessionId, persistCompletedHand, trackHandHistoryEvent } from './handHistoryAnalytics';
 import { appendCompletedHand, buildHandRecord, calculateSessionStats, HandRecord, loadSessionHistory, PlayerSessionStats, StreetKey } from './handHistory';
 
 type TableMode = 'play' | 'review';
@@ -455,6 +455,23 @@ function App() {
   const [recoveryNotice, setRecoveryNotice] = useState<RecoveryNotice | null>(null);
   const customBetRef = useRef<HTMLDivElement | null>(null);
   const persistedHandIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const sessionId = getSessionId();
+    fetch(`/api/hands?sessionId=${encodeURIComponent(sessionId)}`)
+      .then((r) => r.json())
+      .then((data: { hands?: HandRecord[] }) => {
+        if (!Array.isArray(data.hands) || data.hands.length === 0) return;
+        setSessionHistory((local) => {
+          const localIds = new Set(local.map((h) => h.handId));
+          const fromDb = data.hands!.filter((h) => !localIds.has(h.handId));
+          const merged = [...local, ...fromDb].sort((a, b) => b.timestamp - a.timestamp);
+          return merged;
+        });
+        setSelectedHandId((current) => current ?? data.hands![0]?.handId ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   const board = visibleBoard(state);
   const pot = potSize(state);
