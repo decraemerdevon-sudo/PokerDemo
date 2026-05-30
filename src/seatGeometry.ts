@@ -3,8 +3,8 @@ export type SeatPoint = {
   y: number;
 };
 
-const SEAT_CENTER_MIN = 18;
-const SEAT_CENTER_MAX = 82;
+const SEAT_CENTER_MIN = 7;
+const SEAT_CENTER_MAX = 93;
 
 function clampSeatCenter(value: number) {
   return Math.min(SEAT_CENTER_MAX, Math.max(SEAT_CENTER_MIN, value));
