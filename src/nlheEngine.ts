@@ -114,10 +114,10 @@ const streetOrder: Street[] = ['Preflop', 'Flop', 'Turn', 'River'];
 const playerBlueprints: TableSeat[] = [
   { seatIndex: 0, playerId: 'hero', name: 'You', chips: DEFAULT_BUY_IN, isActive: true, isHero: true },
   { seatIndex: 1, playerId: 'mira', name: 'Mira Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'loose-aggressive' },
-  { seatIndex: 2, playerId: 'nash', name: 'Nash Bot', chips: 1000, isActive: true, style: 'balanced' },
-  { seatIndex: 3, playerId: 'atlas', name: 'Atlas Bot', chips: 1080, isActive: true, style: 'pressure' },
-  { seatIndex: 4, playerId: 'river', name: 'River Bot', chips: 1320, isActive: true, style: 'balanced' },
-  { seatIndex: 5, playerId: 'sage', name: 'Sage Bot', chips: 1225, isActive: true, style: 'pressure' },
+  { seatIndex: 2, playerId: 'nash', name: 'Nash Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'balanced' },
+  { seatIndex: 3, playerId: 'atlas', name: 'Atlas Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'pressure' },
+  { seatIndex: 4, playerId: 'river', name: 'River Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'balanced' },
+  { seatIndex: 5, playerId: 'sage', name: 'Sage Bot', chips: DEFAULT_BUY_IN, isActive: true, style: 'pressure' },
 ];
 
 let eventCounter = 0;
@@ -236,9 +236,7 @@ export function syncTableFromHand(table: TableState, hand: HandState): TableStat
     ...table,
     seats: table.seats.map((seat) => {
       const chips = stacksBySeatIndex.get(seat.seatIndex) ?? seat.chips;
-      if (!seat.isHero && chips <= 0) {
-        return { ...seat, playerId: null, name: 'Empty', chips: 0, isActive: false, style: undefined };
-      }
+      // Preserve playerId so autoRecoverBotSeats can find and rebuy busted bots
       return { ...seat, chips, isActive: seat.isActive && chips > 0 };
     }),
   };
@@ -668,7 +666,10 @@ function settleAfterAction(state: HandState, actedSeatId: string): HandState {
 
   const street = nextStreet(state);
   if (!street) return awardHand(state, 'River betting is closed.');
-  return resetForStreet(state, street);
+  const nextState = resetForStreet(state, street);
+  // When no seat can act (everyone all-in), run out remaining streets automatically
+  if (nextState.currentSeatId === null) return settleAfterAction(nextState, actedSeatId);
+  return nextState;
 }
 
 export function submitAction(state: HandState, seatId: string, kind: ActionKind, targetContribution?: number): HandState {

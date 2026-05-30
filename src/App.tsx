@@ -89,7 +89,7 @@ function breakIntoChips(amount: number): ChipStack[] {
 }
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
-  const chipOffset = seatRadius * 0.60;
+  const chipOffset = seatRadius * 0.80;
   return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
 }
 
@@ -413,27 +413,28 @@ function RebuyModal({ onRebuy }: { onRebuy: () => void }) {
 }
 
 function RebuyPanel({
-  canAddOn,
   canRebuy,
   heroStack,
   playableSeats,
   notice,
   addOnAmount,
-  onAddOn,
+  addOnQueued,
+  onAddOnToggle,
   onRebuy,
   onAddOnAmountChange,
 }: {
-  canAddOn: boolean;
   canRebuy: boolean;
   heroStack: number;
   playableSeats: number;
   notice: RecoveryNotice | null;
   addOnAmount: number;
-  onAddOn: () => void;
+  addOnQueued: boolean;
+  onAddOnToggle: () => void;
   onRebuy: () => void;
   onAddOnAmountChange: (amount: number) => void;
 }) {
   const heroBusted = heroStack <= 0;
+  const addOnAvailable = heroStack < DEFAULT_BUY_IN;
   const minAddOn = 100;
   const maxAddOn = Math.max(minAddOn, DEFAULT_BUY_IN - heroStack);
   const clampedAddOn = Math.min(addOnAmount, maxAddOn);
@@ -451,11 +452,18 @@ function RebuyPanel({
       <div className="rebuy-actions">
         <button className="rebuy-primary" disabled={!canRebuy || !heroBusted} onClick={onRebuy} type="button">Rebuy {formatMoney(DEFAULT_BUY_IN)}</button>
         <div className="addon-section">
-          <button className="rebuy-secondary" disabled={!canAddOn} onClick={onAddOn} type="button">Add-on {formatMoney(clampedAddOn)}</button>
+          <button
+            className={`rebuy-secondary${addOnQueued ? ' addon-queued-btn' : ''}`}
+            disabled={!addOnAvailable}
+            onClick={onAddOnToggle}
+            type="button"
+          >
+            {addOnQueued ? `✓ Add-on ${formatMoney(clampedAddOn)} queued` : `Add-on ${formatMoney(clampedAddOn)}`}
+          </button>
           <input
             aria-label="Add-on amount"
             className="addon-slider"
-            disabled={!canAddOn}
+            disabled={!addOnAvailable}
             max={maxAddOn}
             min={minAddOn}
             onChange={(e) => onAddOnAmountChange(Number(e.target.value))}
@@ -480,6 +488,13 @@ function sourceForAnalytics(event: HandEvent) {
 
 function App() {
   const [tableState, setTableState] = useState(() => {
+    try {
+      const saved = window.sessionStorage.getItem('poker-demo-game-state');
+      if (saved) {
+        const parsed = JSON.parse(saved) as { table: TableState; hand: HandState };
+        if (parsed?.table?.seats && parsed?.hand?.stage) return parsed;
+      }
+    } catch { /* fall through to fresh start */ }
     const table = createInitialTable();
     const savedHandNumber = parseInt(window.sessionStorage.getItem('poker-demo-hand-number') || '0', 10);
     if (savedHandNumber > 0) table.handNumber = savedHandNumber;
@@ -503,8 +518,14 @@ function App() {
   const currentRunHandIds = useRef(new Set<string>());
   const [historyView, setHistoryView] = useState<'session' | 'all'>('session');
   const [addOnAmount, setAddOnAmount] = useState(Math.floor(DEFAULT_BUY_IN / 2));
+  const [addOnQueued, setAddOnQueued] = useState(false);
+  const addOnQueuedRef = useRef(false);
+  const addOnAmountRef = useRef(Math.floor(DEFAULT_BUY_IN / 2));
   const [rebuyModalOpen, setRebuyModalOpen] = useState(false);
-  const [heroTotalInvested, setHeroTotalInvested] = useState(HERO_INITIAL_BUY_IN);
+  const [heroTotalInvested, setHeroTotalInvested] = useState(() => {
+    const saved = parseInt(window.sessionStorage.getItem('poker-demo-total-invested') || '0', 10);
+    return saved > 0 ? saved : HERO_INITIAL_BUY_IN;
+  });
 
   useEffect(() => {
     const playerId = getPlayerId();
@@ -522,6 +543,14 @@ function App() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try { window.sessionStorage.setItem('poker-demo-game-state', JSON.stringify(tableState)); } catch {}
+  }, [tableState]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem('poker-demo-total-invested', String(heroTotalInvested));
+  }, [heroTotalInvested]);
 
   const board = visibleBoard(state);
   const pot = potSize(state);
@@ -593,8 +622,19 @@ function App() {
       return next;
     });
     const timer = window.setTimeout(() => {
+      const heroFinalStack = state.seats.find((s) => s.isHero)?.stack ?? 0;
+      const pendingAddOn = addOnQueuedRef.current && heroFinalStack > 0
+        ? Math.min(addOnAmountRef.current, DEFAULT_BUY_IN - heroFinalStack)
+        : 0;
+      if (addOnQueuedRef.current) {
+        addOnQueuedRef.current = false;
+        setAddOnQueued(false);
+      }
       setTableState((current) => {
-        const syncedTable = autoRecoverBotSeats(syncTableFromHand(current.table, current.hand));
+        let syncedTable = autoRecoverBotSeats(syncTableFromHand(current.table, current.hand));
+        if (pendingAddOn > 0) {
+          syncedTable = addChipsToSeat(syncedTable, hero.id, pendingAddOn);
+        }
         const heroSeat = syncedTable.seats.find((seat) => seat.isHero);
         if (heroSeat && heroSeat.chips <= 0) {
           setRebuyModalOpen(true);
@@ -607,6 +647,10 @@ function App() {
         }
         return next;
       });
+      if (pendingAddOn > 0) {
+        setHeroTotalInvested((c) => c + pendingAddOn);
+        setRecoveryNotice({ tone: 'info', message: `${formatMoney(pendingAddOn)} add-on posted before the next hand.` });
+      }
       setSelectedEvent(0);
       setMode('play');
       setCustomBet((current) => ({ ...current, isOpen: false }));
@@ -617,8 +661,15 @@ function App() {
 
   useEffect(() => {
     if (state.stage !== 'hand-complete') return;
+    if (hero.stack <= 0 && addOnQueuedRef.current) {
+      addOnQueuedRef.current = false;
+      setAddOnQueued(false);
+    }
     const fillAmount = DEFAULT_BUY_IN - hero.stack;
-    if (fillAmount > 0) setAddOnAmount(fillAmount);
+    if (fillAmount > 0) {
+      addOnAmountRef.current = fillAmount;
+      setAddOnAmount(fillAmount);
+    }
   }, [state.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -659,12 +710,6 @@ function App() {
     setCustomBetError('');
   };
 
-  const startRecoveredHand = (table: TableState, fallbackHand: HandState) => {
-    const recoveredTable = autoRecoverBotSeats(table);
-    const next = createNextHand(recoveredTable);
-    return next ?? { table: recoveredTable, hand: fallbackHand };
-  };
-
   const rebuyHero = () => {
     setTableState((current) => {
       const syncedTable = syncTableFromHand(current.table, current.hand);
@@ -679,18 +724,10 @@ function App() {
     setMode('play');
   };
 
-  const addOnHero = () => {
-    const effectiveAmount = Math.min(addOnAmount, DEFAULT_BUY_IN - hero.stack);
-    setTableState((current) => {
-      if (current.hand.stage !== 'hand-complete') return current;
-      const syncedTable = syncTableFromHand(current.table, current.hand);
-      const toppedUp = addChipsToSeat(syncedTable, hero.id, effectiveAmount);
-      return startRecoveredHand(toppedUp, current.hand);
-    });
-    setHeroTotalInvested((current) => current + effectiveAmount);
-    setRecoveryNotice({ tone: 'info', message: `${formatMoney(effectiveAmount)} add-on posted before the next hand.` });
-    setSelectedEvent(0);
-    setMode('play');
+  const toggleAddOnQueue = () => {
+    const next = !addOnQueuedRef.current;
+    addOnQueuedRef.current = next;
+    setAddOnQueued(next);
   };
 
   const toggleCustomBet = () => {
@@ -841,12 +878,12 @@ function App() {
         </section>
         <RebuyPanel
           addOnAmount={addOnAmount}
-          canAddOn={state.stage === 'hand-complete' && hero.stack < DEFAULT_BUY_IN}
+          addOnQueued={addOnQueued}
           canRebuy={state.stage === 'hand-complete' && hero.stack <= 0}
           heroStack={hero.stack}
           notice={recoveryNotice}
-          onAddOn={addOnHero}
-          onAddOnAmountChange={setAddOnAmount}
+          onAddOnAmountChange={(amount) => { addOnAmountRef.current = amount; setAddOnAmount(amount); }}
+          onAddOnToggle={toggleAddOnQueue}
           onRebuy={rebuyHero}
           playableSeats={playableSeats}
         />
