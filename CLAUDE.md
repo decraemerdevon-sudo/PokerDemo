@@ -129,3 +129,14 @@ to minimise perceived delay. Show a subtle "thinking..." indicator per seat.
 - Do not introduce a CSS framework without discussion
 - Do not add authentication logic client-side — auth belongs on the backend
 - Do not hard-code bot ranges — strategy logic belongs in nlheEngine.ts
+
+## PR Workflow
+After pushing a branch, automatically open a PR and squash-merge it once CI
+passes — don't wait for manual approval.
+
+- Prefer GitHub's native auto-merge (`gh pr merge --auto --squash`). If
+  "Allow auto-merge" is not enabled on the repo, merge the PR directly once
+  all CI checks are green (`gh pr merge --squash`).
+- Never merge a PR while any required check is red. If CI fails, diagnose
+  the failure, push a fix, and re-verify before merging.
+- Delete the branch after merging.
