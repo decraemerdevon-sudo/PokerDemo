@@ -10,12 +10,13 @@ export function getChipPosition(seatAngle: number, tableCenter: { x: number; y: 
   return getSeatPosition(seatAngle, tableCenter, seatRadius * 0.44);
 }
 
-export function SeatView({ seat, street, reveal, positionLabel, isButton, style }: {
+export function SeatView({ seat, street, reveal, positionLabel, isButton, isThinking, style }: {
   seat: Seat;
   street: Street;
   reveal: boolean;
   positionLabel: string;
   isButton: boolean;
+  isThinking?: boolean;
   style?: CSSProperties;
 }) {
   const isCurrent = seat.status === 'active' && seat.lastAction.toLowerCase().includes('waiting');
@@ -29,7 +30,7 @@ export function SeatView({ seat, street, reveal, positionLabel, isButton, style 
             {isButton && <span className="dealer-chip" aria-label="dealer button">D</span>}
           </span>
         </div>
-        <p>{seat.status === 'folded' ? 'Folded' : seat.status === 'all-in' ? 'All-in' : seat.lastAction}</p>
+        <p>{isThinking ? <span className="seat-thinking" aria-label="Bot is thinking">Thinking…</span> : seat.status === 'folded' ? 'Folded' : seat.status === 'all-in' ? 'All-in' : seat.lastAction}</p>
       </div>
       <div className="seat-cards" aria-label={`${seat.name} cards`}>
         {seat.cards.map((card: Card, index: number) => <CardView key={`${seat.id}-${street}-${index}`} card={card} hidden={!reveal} />)}
