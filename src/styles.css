@@ -1463,16 +1463,61 @@ dd {
 }
 
 .street-block {
+  border-radius: 6px;
   border-top: 1px solid #ded3c1;
+  cursor: pointer;
   margin-top: 14px;
-  padding-top: 12px;
+  padding: 10px 8px 4px;
+  transition: background 0.12s;
+}
+
+.street-block:hover {
+  background: #f0e9dc;
+}
+
+.street-block-active {
+  background: #e8f5e9;
+  border-top-color: #2d7a4f;
+  outline: 2px solid #2d7a4f;
+  outline-offset: -2px;
+}
+
+.street-block-active:hover {
+  background: #ddf0e2;
 }
 
 .street-block h4 {
+  align-items: center;
   color: #33423a;
+  display: flex;
   font-size: 0.78rem;
+  gap: 8px;
   letter-spacing: 0;
   margin: 0 0 8px;
+}
+
+.street-coach-hint {
+  color: #2d7a4f;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-left: auto;
+  opacity: 0;
+  text-transform: uppercase;
+  transition: opacity 0.12s;
+}
+
+.street-block:hover .street-coach-hint,
+.street-block-active .street-coach-hint {
+  opacity: 1;
+}
+
+.street-block-active .street-coach-hint {
+  color: #1a5c36;
+}
+
+.result-block {
+  cursor: default;
 }
 
 .history-action {

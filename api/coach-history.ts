@@ -28,6 +28,7 @@ type SessionPayload = {
 type HandPayload = {
   mode: 'hand';
   hand: unknown;
+  focusStreet?: string;
   userMessage: string;
   history?: HistoryMsg[];
 };
@@ -55,8 +56,11 @@ function buildSessionContext(stats: unknown, hands: unknown[]): string {
   return lines.join('\n');
 }
 
-function buildHandContext(hand: unknown): string {
-  return `=== HAND REVIEW ===\n\n${JSON.stringify(hand, null, 2)}`;
+function buildHandContext(hand: unknown, focusStreet?: string): string {
+  const focus = focusStreet
+    ? `\nFOCUS: The player clicked on the ${focusStreet.toUpperCase()} street — centre your analysis on that betting round specifically, then touch on any earlier streets that led to it.\n`
+    : '';
+  return `=== HAND REVIEW ===${focus}\n${JSON.stringify(hand, null, 2)}`;
 }
 
 export default async function handler(req: VercelReq, res: VercelRes) {
@@ -83,7 +87,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     context = buildSessionContext(payload.stats, payload.hands);
     systemPrompt = SESSION_SYSTEM;
   } else {
-    context = buildHandContext(payload.hand);
+    context = buildHandContext(payload.hand, payload.focusStreet);
     systemPrompt = HAND_SYSTEM;
   }
 
