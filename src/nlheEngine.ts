@@ -474,7 +474,6 @@ function nextSeatId(state: HandState, fromSeatId: string) {
 
 function roundClosed(state: HandState) {
   const contenders = state.seats.filter((seat) => seat.status === 'active');
-  if (contenders.length <= 1) return true;
   const highBet = currentBet(state);
   return contenders.every((seat) => state.actedThisRound.includes(seat.id) && seat.streetContribution === highBet);
 }
