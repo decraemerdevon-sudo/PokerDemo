@@ -1,4 +1,4 @@
-import { KeyboardEvent, useMemo, useRef, useState, useEffect } from 'react';
+import { KeyboardEvent, useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import {
   ActionKind,
   Card,
@@ -87,6 +87,7 @@ function App() {
   const addOnQueuedRef = useRef(false);
   const addOnAmountRef = useRef(Math.floor(DEFAULT_BUY_IN / 2));
   const [rebuyModalOpen, setRebuyModalOpen] = useState(false);
+  const [thinkingSeats, setThinkingSeats] = useState<Set<string>>(new Set());
   const [heroTotalInvested, setHeroTotalInvested] = useState(() => {
     const saved = parseInt(window.sessionStorage.getItem('poker-demo-total-invested') || '0', 10);
     return saved > 0 ? saved : HERO_INITIAL_BUY_IN;
@@ -156,17 +157,80 @@ function App() {
     });
   }, [state.events.length, state.handId]);
 
+  const SUIT_CODES_BOT: Record<Card['suit'], string> = { spades: 's', hearts: 'h', diamonds: 'd', clubs: 'c' };
+  const cardCode = useCallback((c: Card) => `${c.rank}${SUIT_CODES_BOT[c.suit]}`, []);
+
   useEffect(() => {
     if (!activeSeat || activeSeat.isHero || state.stage !== 'awaiting-action') return;
-    const timer = window.setTimeout(() => {
-      setTableState((current) => {
-        if (current.hand.currentSeatId !== activeSeat.id) return current;
-        const decision = chooseBotAction(current.hand, activeSeat.id);
-        return { ...current, hand: submitAction(current.hand, activeSeat.id, decision.kind, decision.targetContribution) };
+
+    const seatId = activeSeat.id;
+    const MIN_DELAY = 500;
+    const startTime = Date.now();
+
+    setThinkingSeats((prev) => new Set(prev).add(seatId));
+
+    const legal = getLegalActions(state, seatId);
+    const payload = {
+      street: state.street,
+      handNumber: state.handNumber,
+      board: state.board.map(cardCode),
+      pot: potSize(state),
+      bigBlind: state.bigBlind,
+      botStyle: activeSeat.style ?? 'balanced',
+      botSeatId: seatId,
+      seats: state.seats.map((s) => ({
+        id: s.id,
+        name: s.name,
+        role: s.role,
+        stack: s.stack,
+        streetContribution: s.streetContribution,
+        status: s.status,
+        isHero: s.isHero ?? false,
+        isBot: !s.isHero,
+        holeCards: s.id === seatId ? s.cards.map(cardCode) : null,
+      })),
+      legalActions: legal.map((a) => ({ kind: a.kind, label: a.label, targetContribution: a.targetContribution, min: a.min, max: a.max })),
+      recentEvents: state.events.slice(-8).map((e) => `${e.actor} ${e.action}${e.amount ? ` $${e.amount}` : ''}`),
+    };
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4000);
+
+    fetch('/api/bot-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+      .then((r) => r.ok ? r.json() as Promise<{ kind: ActionKind; targetContribution?: number }> : Promise.reject())
+      .then((decision) => {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, MIN_DELAY - elapsed);
+        window.setTimeout(() => {
+          setThinkingSeats((prev) => { const next = new Set(prev); next.delete(seatId); return next; });
+          setTableState((current) => {
+            if (current.hand.currentSeatId !== seatId) return current;
+            return { ...current, hand: submitAction(current.hand, seatId, decision.kind, decision.targetContribution) };
+          });
+        }, remaining);
+      })
+      .catch(() => {
+        // Fallback to local engine on any error
+        window.clearTimeout(timeout);
+        setThinkingSeats((prev) => { const next = new Set(prev); next.delete(seatId); return next; });
+        setTableState((current) => {
+          if (current.hand.currentSeatId !== seatId) return current;
+          const decision = chooseBotAction(current.hand, seatId);
+          return { ...current, hand: submitAction(current.hand, seatId, decision.kind, decision.targetContribution) };
+        });
       });
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [activeSeat, state.stage]);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+      setThinkingSeats((prev) => { const next = new Set(prev); next.delete(seatId); return next; });
+    };
+  }, [activeSeat?.id, state.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSelectedEvent((current) => Math.max(0, Math.min(current, replayEvents.length - 1)));
@@ -370,6 +434,7 @@ function App() {
               return (
                 <SeatView
                   isButton={seat.seatIndex === state.buttonSeatIndex}
+                  isThinking={thinkingSeats.has(seat.id)}
                   key={seat.id}
                   positionLabel={getSeatLabel(seat.seatIndex, state.buttonSeatIndex, occupiedSeatIndices)}
                   reveal={seat.isHero || showAllCards}

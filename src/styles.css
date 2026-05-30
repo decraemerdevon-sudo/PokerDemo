@@ -420,6 +420,17 @@ dd {
   white-space: nowrap;
 }
 
+.seat-thinking {
+  animation: thinking-pulse 1s ease-in-out infinite;
+  color: #a08050;
+  font-style: italic;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .seat-money {
   border-top: 1px solid #ddd2c0;
   color: #2f2b23;
