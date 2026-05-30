@@ -8,7 +8,7 @@ Target experience is comparable to major online poker software (PokerStars,
 GGPoker) in feel and correctness. Single-player vs bots for now, with a
 roadmap toward multiplayer and advanced training features.
 
-## Current State (as of 2026-05-29)
+## Current State (as of 2026-05-30)
 - Functional 6-handed NLHE table with bot opponents
 - Neon Postgres wired up — hands persist across tab closes and browser sessions
 - Session identity: playerId (localStorage, permanent) + sessionId (sessionStorage,
@@ -26,6 +26,16 @@ roadmap toward multiplayer and advanced training features.
 - Add-on: range slider lets player choose any amount from $100 to $1500
 - Bot bust recovery: autoRecoverBotSeats() auto-rebuys bots after every hand
 - Hand number persists across page refresh (via sessionStorage), resets on tab close
+- Live AI coach panel (right rail) — streams advice from claude-sonnet-4-6 via SSE;
+  pre-built quick prompt chips; full conversation history per session
+- Hand history coaching — AI coach embedded at the bottom of the hand history panel;
+  context is driven by the last-clicked element:
+  - Session toggle clicked → session mode (leak analysis across stats + recent hands)
+  - Hand in list clicked → hand mode (per-street breakdown of that hand)
+  - Betting street block clicked → street mode (focused on that street)
+  - Each context has its own persistent message thread
+- .claude/ configured for Claude Code on the web: auto permission mode + SessionStart
+  hook (npm install) + PR workflow instructions
 - No authentication yet
 
 ## Tech Stack
@@ -40,7 +50,7 @@ roadmap toward multiplayer and advanced training features.
 - src/nlheEngine.ts          — Core poker engine. Rules, hand logic, bot AI.
                                Do not add UI logic here.
 - src/App.tsx                — Main React component. All game state lives here.
-                               ~870 lines — planned for component split.
+                               ~1100+ lines — planned for component split.
 - src/handHistory.ts         — Session stats calculation. buildHandRecord() is
                                exported for use in App.tsx.
 - src/handHistoryAnalytics.ts — playerId / sessionId management, RUN_ID
@@ -49,6 +59,11 @@ roadmap toward multiplayer and advanced training features.
 - src/styles.css             — All styling. No inline styles, no CSS framework.
 - api/hand-history.ts        — POST endpoint. Writes session + hand to Neon.
 - api/hands.ts               — GET endpoint. Reads last 200 hands by playerId.
+- api/coach.ts               — POST/SSE endpoint. Streams live coaching advice
+                               from claude-sonnet-4-6 given current hand state.
+- api/coach-history.ts       — POST/SSE endpoint. Streams coaching analysis of
+                               a session (mode:'session') or a single hand with
+                               optional street focus (mode:'hand', focusStreet).
 - api/migrate.ts             — POST endpoint. Drops and recreates DB schema.
                                Run once via Hoppscotch / curl after deploy.
 
@@ -74,7 +89,8 @@ serverless — do NOT use it.
 ## Roadmap (in priority order)
 1. ~~Neon Postgres~~ DONE — hands persist via api/hand-history.ts + api/hands.ts
 2. Clerk Auth — user identity so history survives across devices and browsers
-3. Coaching Agent — Claude API integration, persistent side panel chat
+3. ~~Coaching Agent~~ DONE — live coach panel (api/coach.ts) + hand history
+   coaching with click-to-context routing (api/coach-history.ts)
 4. App.tsx component split — extract SeatView, BoardView, ActionPanel etc.
 5. Vitest — replace raw assertion scripts with a proper test framework
 
@@ -86,22 +102,25 @@ serverless — do NOT use it.
 - Leaderboards and player progression tracking
 - Multiplayer
 
-## Coaching Agent (planned — Priority 3)
-A persistent chat panel in the right rail of the UI. Players can type
-questions at any point during or after a hand, or click pre-built prompt
-chips for common questions.
+## Coaching Agent (DONE)
+Two coaching surfaces, both backed by claude-sonnet-4-6 streaming via SSE:
 
-Architecture:
-- Chat panel component in React UI (right rail, always visible)
-- Pre-built prompt chips: "What's my best play here?", "Analyse my last hand",
-  "What are my pot odds?", "Was that a mistake?"
-- Frontend sends message + current hand state OR selected hand history to
-  api/coach.ts (new endpoint)
-- Uses claude-sonnet-4-6 for coaching responses (more thorough reasoning)
-- Both coach and bots share the same Anthropic SDK client and API key
-- Response streams back and renders in the chat panel
-- Long term: agent references full session history from the database,
-  tracks leaks and tendencies over time
+**Live coach panel** (right rail, always visible during play):
+- Pre-built quick prompt chips + free-text input
+- Sends current hand state (street, board, stacks, pot, hero cards, legal
+  actions, recent events) to api/coach.ts
+- Full conversation history maintained per session (last 8 messages sent
+  as context)
+
+**Hand history coaching** (embedded at the bottom of the hand history panel):
+- Context driven by the last element the user clicked:
+  - Session toggle → session mode: stats + up to 25 hands → leak analysis
+  - Hand in list → hand mode: full HandRecord → per-street breakdown
+  - Betting street block → street mode: hand data + focus directive for
+    that street (focusStreet field in api/coach-history.ts payload)
+- Each context key (`session:view`, `hand:id`, `street:id:street`) has its
+  own persistent message thread
+- Quick prompts adapt: session / hand / street variants
 
 ## Bot Strategy (current + planned)
 Current: Three styles — loose-aggressive, balanced, pressure. Realistic
