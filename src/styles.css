@@ -197,7 +197,7 @@ h3 {
   position: absolute;
   transform: translate(-50%, -50%);
   transition: left 180ms ease, top 180ms ease;
-  z-index: 3;
+  z-index: 5;
 }
 
 .board-pot {
@@ -603,6 +603,11 @@ dd {
   font-size: 0.72rem;
   font-weight: 800;
   justify-content: space-between;
+}
+
+.addon-queued-btn {
+  background: #1e4c45 !important;
+  color: #fffaf1 !important;
 }
 
 .rebuy-modal-overlay {
