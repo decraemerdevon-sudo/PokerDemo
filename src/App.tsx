@@ -467,7 +467,7 @@ function RebuyPanel({
             max={maxAddOn}
             min={minAddOn}
             onChange={(e) => onAddOnAmountChange(Number(e.target.value))}
-            step={50}
+            step={1}
             type="range"
             value={clampedAddOn}
           />
@@ -799,7 +799,10 @@ function App() {
               <dl className="pot-summary"><div><dt>Active</dt><dd>{activePlayers.length}</dd></div></dl>
             </div>
             <div className="seats-grid">{state.seats.map((seat) => {
-              const position = getSeatPosition(seatAngleForIndex(seat.seatIndex, tableSeatCount), { x: 50, y: 50 }, 32);
+              const seatAngle = seatAngleForIndex(seat.seatIndex, tableSeatCount);
+              // Top (0°) and bottom (180°) seats use a larger radius so chips fit in the gap between them and the board
+              const seatRadius = Math.abs(Math.cos(seatAngle * Math.PI / 180)) > 0.7 ? 40 : 32;
+              const position = getSeatPosition(seatAngle, { x: 50, y: 50 }, seatRadius);
               return (
                 <SeatView
                   isButton={seat.seatIndex === state.buttonSeatIndex}
