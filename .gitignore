@@ -3,3 +3,4 @@ node_modules/
 .npm-cache/
 .pw-browsers/
 *.tsbuildinfo
+.claude/settings.local.json
