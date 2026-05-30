@@ -11,6 +11,7 @@
     "test:engine": "tsx scripts/verify-nlhe-engine.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@neondatabase/serverless": "^1.1.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
