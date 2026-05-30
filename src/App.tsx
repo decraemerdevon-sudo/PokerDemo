@@ -115,14 +115,43 @@ function clampWholeChip(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function buildCoachAdvice(state: HandState) {
+type CoachMessage = { role: 'user' | 'assistant'; content: string };
+
+const QUICK_PROMPTS = [
+  "What's my best play?",
+  "What are my pot odds?",
+  "Am I ahead or behind?",
+  "Analyse my range here",
+  "Was that last action a mistake?",
+];
+
+const SUIT_CODES: Record<Card['suit'], string> = { spades: 's', hearts: 'h', diamonds: 'd', clubs: 'c' };
+
+function buildGameStateForCoach(state: HandState) {
   const hero = state.seats.find((seat) => seat.isHero)!;
-  const legal = getLegalActions(state, hero.id);
-  const board = visibleBoard(state);
-  const boardText = cardText(board) || 'not dealt';
-  const actionText = legal.length ? legal.map((action) => action.label).join(', ') : 'none';
-  const recent = state.events.slice(-4).map((event) => `${event.actor} ${event.action}${event.amount ? ` ${formatMoney(event.amount)}` : ''}`).join(', ');
-  return `Hero holds ${cardText(hero.cards)} on ${state.street.toLowerCase()} with ${formatMoney(potSize(state))} in the pot. Board: ${boardText} (${texture(board)}). Legal actions: ${actionText}. Recent action: ${recent || 'none'}.`;
+  const cardCode = (c: Card) => `${c.rank}${SUIT_CODES[c.suit]}`;
+  return {
+    street: state.street,
+    handNumber: state.handNumber,
+    board: state.board.map(cardCode),
+    pot: potSize(state),
+    heroCards: hero.cards.map(cardCode),
+    heroRole: hero.role,
+    heroStack: hero.stack,
+    heroStreetContribution: hero.streetContribution,
+    legalActions: getLegalActions(state, hero.id).map((a) => a.label),
+    players: state.seats.map((s) => ({
+      name: s.name,
+      role: s.role,
+      stack: s.stack,
+      streetContribution: s.streetContribution,
+      status: s.status,
+      isHero: s.isHero,
+      lastAction: s.lastAction,
+    })),
+    recentEvents: state.events.slice(-8).map((e) => `${e.actor} ${e.action}${e.amount ? ` $${e.amount}` : ''}`),
+    bigBlind: state.bigBlind,
+  };
 }
 
 function CardView({ card, hidden = false }: { card: Card; hidden?: boolean }) {
@@ -522,6 +551,12 @@ function App() {
   const addOnQueuedRef = useRef(false);
   const addOnAmountRef = useRef(Math.floor(DEFAULT_BUY_IN / 2));
   const [rebuyModalOpen, setRebuyModalOpen] = useState(false);
+  const [coachMessages, setCoachMessages] = useState<CoachMessage[]>([]);
+  const [coachStreaming, setCoachStreaming] = useState(false);
+  const [coachStreamText, setCoachStreamText] = useState('');
+  const [coachInput, setCoachInput] = useState('');
+  const coachMessagesRef = useRef<HTMLDivElement | null>(null);
+  const abortCoachRef = useRef<AbortController | null>(null);
   const [heroTotalInvested, setHeroTotalInvested] = useState(() => {
     const saved = parseInt(window.sessionStorage.getItem('poker-demo-total-invested') || '0', 10);
     return saved > 0 ? saved : HERO_INITIAL_BUY_IN;
@@ -576,7 +611,6 @@ function App() {
     [historyView, sessionHistory]
   );
   const sessionStats = useMemo(() => state.seats.map((seat) => calculateSessionStats(seat.id, visibleHistory, state.bigBlind)), [visibleHistory, state.seats, state.bigBlind]);
-  const coachAdvice = useMemo(() => buildCoachAdvice(state), [state]);
 
   useEffect(() => {
     const last = state.events[state.events.length - 1];
@@ -729,6 +763,67 @@ function App() {
     addOnQueuedRef.current = next;
     setAddOnQueued(next);
   };
+
+  const sendCoachMessage = async (message: string) => {
+    if (coachStreaming) return;
+    abortCoachRef.current?.abort();
+    abortCoachRef.current = new AbortController();
+    setCoachStreaming(true);
+    setCoachStreamText('');
+    const historySnapshot = coachMessages.slice(-8);
+    try {
+      const resp = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: buildGameStateForCoach(state), userMessage: message, history: historySnapshot }),
+        signal: abortCoachRef.current.signal,
+      });
+      if (!resp.ok || !resp.body) throw new Error('Coach request failed');
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let assistantText = '';
+      let finished = false;
+      while (!finished) {
+        const { value, done } = await reader.read();
+        finished = done;
+        buf += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') { finished = true; break; }
+          try {
+            const parsed = JSON.parse(data) as { text?: string; error?: string };
+            if (parsed.error) throw new Error(parsed.error);
+            if (parsed.text) { assistantText += parsed.text; setCoachStreamText(assistantText); }
+          } catch { /* skip malformed chunk */ }
+        }
+      }
+      if (assistantText) {
+        setCoachMessages((prev) => [
+          ...prev,
+          { role: 'user', content: message },
+          { role: 'assistant', content: assistantText },
+        ]);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setCoachMessages((prev) => [
+        ...prev,
+        { role: 'user', content: message },
+        { role: 'assistant', content: 'Coach unavailable — ensure ANTHROPIC_API_KEY is set in your Vercel environment.' },
+      ]);
+    } finally {
+      setCoachStreaming(false);
+      setCoachStreamText('');
+    }
+  };
+
+  useEffect(() => {
+    coachMessagesRef.current?.scrollTo({ top: coachMessagesRef.current.scrollHeight, behavior: 'smooth' });
+  }, [coachMessages, coachStreamText]);
 
   const toggleCustomBet = () => {
     if (!customBetLimits) return;
@@ -893,8 +988,44 @@ function App() {
       </section>
       <aside className="side-rail" aria-label="Training side panels">
         <section className="coach-panel" aria-labelledby="coach-title">
-          <div className="panel-heading"><div><p className="eyebrow">Live context</p><h2 id="coach-title">Coach</h2></div></div>
-          <div className="coach-card"><strong>Suggested line: use only engine actions</strong><p>{coachAdvice}</p></div>
+          <div className="panel-heading">
+            <div><p className="eyebrow">AI Powered</p><h2 id="coach-title">Coach</h2></div>
+            <span className={`coach-status${coachStreaming ? ' coach-status-thinking' : ''}`}>{coachStreaming ? 'Thinking…' : 'Ready'}</span>
+          </div>
+          <div className="coach-messages" ref={coachMessagesRef}>
+            {coachMessages.length === 0 && !coachStreaming && (
+              <p className="coach-empty">Tap a prompt or ask a question to get strategy advice.</p>
+            )}
+            {coachMessages.map((msg, i) => (
+              <div key={i} className={`coach-msg coach-msg-${msg.role}`}>
+                <p>{msg.content}</p>
+              </div>
+            ))}
+            {coachStreaming && (
+              <div className="coach-msg coach-msg-assistant coach-msg-streaming">
+                <p>{coachStreamText || '…'}</p>
+              </div>
+            )}
+          </div>
+          <div className="coach-chips" aria-label="Quick prompts">
+            {QUICK_PROMPTS.map((prompt) => (
+              <button className="coach-chip" disabled={coachStreaming} key={prompt} onClick={() => sendCoachMessage(prompt)} type="button">
+                {prompt}
+              </button>
+            ))}
+          </div>
+          <form className="coach-input-row" onSubmit={(e) => { e.preventDefault(); const msg = coachInput.trim(); if (msg) { sendCoachMessage(msg); setCoachInput(''); } }}>
+            <input
+              aria-label="Ask your coach"
+              className="coach-input"
+              disabled={coachStreaming}
+              onChange={(e) => setCoachInput(e.target.value)}
+              placeholder="Ask your coach…"
+              type="text"
+              value={coachInput}
+            />
+            <button className="coach-send" disabled={coachStreaming || !coachInput.trim()} type="submit">→</button>
+          </form>
         </section>
         <section className="review-panel" aria-labelledby="review-title">
           <div className="panel-heading"><div><p className="eyebrow">Replay</p><h2 id="review-title">Hand Timeline</h2></div><button onClick={() => setHistoryVisible((visible) => !visible)} type="button">{historyVisible ? 'Hide' : 'Show'}</button></div>
