@@ -327,6 +327,13 @@ const HAND_QUICK_PROMPTS = [
   "What's the optimal line?",
 ];
 
+const STREET_QUICK_PROMPTS = [
+  "What's the best sizing here?",
+  "Should I have c-bet?",
+  "Was this the right line?",
+  "What hands call/fold here?",
+];
+
 function HandHistoryPanel({
   history,
   selectedHandId,
@@ -347,9 +354,19 @@ function HandHistoryPanel({
   const selected = history.find((hand) => hand.handId === selectedHandId) ?? history[0] ?? null;
   const heroId = selected?.players.find((player) => player.isHero)?.playerId;
 
-  const contextKey = selected ? `hand:${selected.handId}` : `session:${historyView}`;
-  const isHandMode = !!selected && !!selectedHandId;
-  const quickPrompts = isHandMode ? HAND_QUICK_PROMPTS : SESSION_QUICK_PROMPTS;
+  const [coachContext, setCoachContext] = useState<'session' | 'hand' | 'street'>('session');
+  const [focusStreet, setFocusStreet] = useState<StreetKey | null>(null);
+
+  const contextKey =
+    coachContext === 'street' && selected && focusStreet ? `street:${selected.handId}:${focusStreet}`
+    : coachContext === 'hand' && selected ? `hand:${selected.handId}`
+    : `session:${historyView}`;
+
+  const isHandMode = coachContext !== 'session';
+  const quickPrompts =
+    coachContext === 'street' ? STREET_QUICK_PROMPTS
+    : coachContext === 'hand' ? HAND_QUICK_PROMPTS
+    : SESSION_QUICK_PROMPTS;
 
   const [historyCoachThreads, setHistoryCoachThreads] = useState<Record<string, CoachMessage[]>>({});
   const [historyCoachStreaming, setHistoryCoachStreaming] = useState(false);
@@ -378,7 +395,9 @@ function HandHistoryPanel({
     setHistoryCoachStreaming(true);
     setHistoryCoachStreamText('');
 
-    const body = isHandMode
+    const body = coachContext === 'street'
+      ? { mode: 'hand', hand: selected, focusStreet, userMessage: message, history: prevMessages.slice(-8) }
+      : coachContext === 'hand'
       ? { mode: 'hand', hand: selected, userMessage: message, history: prevMessages.slice(-8) }
       : { mode: 'session', stats, hands: history, userMessage: message, history: prevMessages.slice(-8) };
 
@@ -432,8 +451,8 @@ function HandHistoryPanel({
       <header className="hand-history-header">
         <div><p className="eyebrow">Hand History</p><h2>{historyView === 'session' ? 'This Session' : 'All Sessions'}</h2></div>
         <div className="history-view-toggle" role="group" aria-label="History view">
-          <button type="button" className={historyView === 'session' ? 'active' : ''} onClick={() => onHistoryViewChange('session')} aria-pressed={historyView === 'session'}>This Session</button>
-          <button type="button" className={historyView === 'all' ? 'active' : ''} onClick={() => onHistoryViewChange('all')} aria-pressed={historyView === 'all'}>All Sessions</button>
+          <button type="button" className={historyView === 'session' ? 'active' : ''} onClick={() => { onHistoryViewChange('session'); setCoachContext('session'); }} aria-pressed={historyView === 'session'}>This Session</button>
+          <button type="button" className={historyView === 'all' ? 'active' : ''} onClick={() => { onHistoryViewChange('all'); setCoachContext('session'); }} aria-pressed={historyView === 'all'}>All Sessions</button>
         </div>
         <button onClick={onClose} type="button" aria-label="Close hand history">Close</button>
       </header>
@@ -467,7 +486,7 @@ function HandHistoryPanel({
               const hero = hand.players.find((player) => player.isHero);
               const winnerNames = hand.pots.map((pot) => hand.players.find((player) => player.playerId === pot.winnerId)?.displayName ?? 'Unknown').join(', ');
               return (
-                <button className={selected?.handId === hand.handId ? 'hand-list-item active' : 'hand-list-item'} key={hand.handId} onClick={() => setSelectedHandId(hand.handId)} type="button">
+                <button className={selected?.handId === hand.handId ? 'hand-list-item active' : 'hand-list-item'} key={hand.handId} onClick={() => { setSelectedHandId(hand.handId); setCoachContext('hand'); setFocusStreet(null); }} type="button">
                   <strong>#{hand.handNumber}</strong><span>{winnerNames} won</span>{hero && <em className={hero.netResult >= 0 ? 'net-positive' : 'net-negative'}>{signedMoney(hero.netResult)}</em>}
                 </button>
               );
@@ -492,8 +511,8 @@ function HandHistoryPanel({
                   const record = selected.streets[street];
                   if (!record) return null;
                   return (
-                    <div className="street-block" key={street}>
-                      <h4>{streetTitle(street, selected)}</h4>
+                    <div className={`street-block${coachContext === 'street' && focusStreet === street ? ' street-block-active' : ''}`} key={street} onClick={() => { setCoachContext('street'); setFocusStreet(street); }} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setCoachContext('street'); setFocusStreet(street); } }} aria-label={`Focus coach on ${street}`}>
+                      <h4>{streetTitle(street, selected)}<span className="street-coach-hint">Click to coach</span></h4>
                       {record.actions.length === 0 ? <p className="muted">No actions.</p> : record.actions.map((action, index) => (
                         <div className="history-action" key={`${street}-${action.playerId}-${index}`}>
                           <span>{action.position}</span><strong>{action.displayName}</strong><span>{action.actionType.replace('-', ' ')}</span>
@@ -520,12 +539,22 @@ function HandHistoryPanel({
         <div className="history-coach">
           <div className="history-coach-header">
             <span className="eyebrow">AI Coach</span>
-            <span className="history-coach-context">{isHandMode ? `Hand #${selected!.handNumber}` : historyView === 'session' ? 'This Session' : 'All Sessions'}</span>
+            <span className="history-coach-context">
+              {coachContext === 'street' && selected && focusStreet
+                ? `Hand #${selected.handNumber} · ${focusStreet.toUpperCase()}`
+                : coachContext === 'hand' && selected
+                ? `Hand #${selected.handNumber}`
+                : historyView === 'session' ? 'This Session' : 'All Sessions'}
+            </span>
             <span className={`coach-status${historyCoachStreaming ? ' coach-status-thinking' : ''}`}>{historyCoachStreaming ? 'Thinking…' : 'Ready'}</span>
           </div>
           <div className="history-coach-messages" ref={historyCoachMessagesRef}>
             {coachMessages.length === 0 && !historyCoachStreaming && (
-              <p className="history-coach-empty">{isHandMode ? 'Ask about this hand — sizing, lines, mistakes.' : 'Ask about your overall play, leaks, and trends.'}</p>
+              <p className="history-coach-empty">
+                {coachContext === 'street' && focusStreet ? `Ask about the ${focusStreet} — sizing, lines, alternatives.`
+                : coachContext === 'hand' ? 'Ask about this hand — sizing, lines, mistakes.'
+                : 'Ask about your overall play, leaks, and trends.'}
+              </p>
             )}
             {coachMessages.map((msg, i) => (
               <div className={`coach-msg-${msg.role}`} key={i}>{msg.content}</div>
@@ -545,7 +574,7 @@ function HandHistoryPanel({
           <form className="coach-input-row" onSubmit={(e) => { e.preventDefault(); const msg = historyCoachInput.trim(); if (msg) { sendHistoryCoachMessage(msg); setHistoryCoachInput(''); } }}>
             <input
               className="coach-input"
-              placeholder={isHandMode ? 'Ask about this hand…' : 'Ask about your session…'}
+              placeholder={coachContext === 'street' && focusStreet ? `Ask about the ${focusStreet}…` : coachContext === 'hand' ? 'Ask about this hand…' : 'Ask about your session…'}
               value={historyCoachInput}
               onChange={(e) => setHistoryCoachInput(e.target.value)}
               disabled={historyCoachStreaming}
