@@ -89,8 +89,8 @@ function breakIntoChips(amount: number): ChipStack[] {
 }
 
 function getChipPosition(seatAngle: number, tableCenter: { x: number; y: number }, seatRadius: number) {
-  const chipOffset = seatRadius * 0.80;
-  return getSeatPosition(seatAngle, tableCenter, seatRadius - chipOffset);
+  // Chips sit at ~44% of the table radius — between the board edge (~21) and the seat panels (~32)
+  return getSeatPosition(seatAngle, tableCenter, seatRadius * 0.44);
 }
 
 function texture(cards: Card[]) {
