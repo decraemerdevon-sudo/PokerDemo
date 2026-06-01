@@ -248,14 +248,28 @@ function buildContext(p: BotActionPayload): string {
   return lines.join('\n');
 }
 
-function safeFallback(legalActions: LegalAction[]) {
-  // call > check > fold — never pathologically fold when other options exist
-  const pick =
-    legalActions.find((a) => a.kind === 'call') ??
-    legalActions.find((a) => a.kind === 'check') ??
-    legalActions[0];
-  return { kind: pick.kind, targetContribution: pick.targetContribution ?? null };
-}
+// Forcing tool use guarantees the model returns schema-valid JSON in the
+// tool_use input block — no fragile text/markdown parsing of free-form output,
+// which was silently failing and dropping every bot onto the fallback.
+const ACTION_TOOL = {
+  name: 'submit_action',
+  description: 'Submit your poker action decision for this spot.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      kind: {
+        type: 'string',
+        enum: ['fold', 'check', 'call', 'raise', 'bet'],
+        description: 'The action to take. Must be one of the legal options shown.',
+      },
+      targetContribution: {
+        type: ['number', 'null'],
+        description: 'For "raise"/"bet": total chips committed this street after acting (within the shown min-max). For "fold"/"check"/"call": null.',
+      },
+    },
+    required: ['kind'],
+  },
+};
 
 export default async function handler(req: VercelReq, res: VercelRes) {
   if (req.method !== 'POST') {
@@ -276,31 +290,39 @@ export default async function handler(req: VercelReq, res: VercelRes) {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 80,
+      max_tokens: 256,
       system,
+      tools: [ACTION_TOOL],
+      tool_choice: { type: 'tool', name: 'submit_action' },
       messages: [{ role: 'user', content: context }],
     });
 
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
-    const parsed = JSON.parse(text) as { kind: string; targetContribution: number | null };
+    const toolUse = response.content.find((block) => block.type === 'tool_use');
+    if (!toolUse || toolUse.type !== 'tool_use') {
+      throw new Error('no tool_use block in response');
+    }
+    const decision = toolUse.input as { kind: string; targetContribution?: number | null };
 
     const validKinds = new Set(payload.legalActions.map((a) => a.kind));
-    if (!validKinds.has(parsed.kind)) {
-      res.status(200).json(safeFallback(payload.legalActions));
-      return;
+    if (!validKinds.has(decision.kind)) {
+      throw new Error(`model chose illegal action "${decision.kind}"`);
     }
 
-    // Clamp raise/bet targetContribution to valid range
-    let targetContribution = parsed.targetContribution ?? undefined;
-    if ((parsed.kind === 'raise' || parsed.kind === 'bet') && targetContribution != null) {
-      const action = payload.legalActions.find((a) => a.kind === parsed.kind);
+    // Clamp raise/bet targetContribution to the legal range
+    let targetContribution = decision.targetContribution ?? undefined;
+    if ((decision.kind === 'raise' || decision.kind === 'bet') && targetContribution != null) {
+      const action = payload.legalActions.find((a) => a.kind === decision.kind);
       if (action?.min != null && action?.max != null) {
         targetContribution = Math.max(action.min, Math.min(action.max, targetContribution));
       }
     }
 
-    res.status(200).json({ kind: parsed.kind, targetContribution: targetContribution ?? null });
-  } catch {
-    res.status(200).json(safeFallback(payload.legalActions));
+    res.status(200).json({ kind: decision.kind, targetContribution: targetContribution ?? null });
+  } catch (err) {
+    // Surface the real cause in Vercel logs instead of swallowing it, and
+    // signal failure with 502 so the client falls back to the local engine's
+    // chooseBotAction (varied strategy) rather than a degenerate call/fold.
+    console.error('[bot-action] decision failed:', err);
+    res.status(502).json({ error: 'bot_decision_failed' });
   }
 }
