@@ -93,6 +93,15 @@ function buildContext(p: BotActionPayload): string {
   return lines.join('\n');
 }
 
+function safeFallback(legalActions: LegalAction[]) {
+  // Prefer call > check > fold — never default to fold when there's a better option
+  const pick =
+    legalActions.find((a) => a.kind === 'call') ??
+    legalActions.find((a) => a.kind === 'check') ??
+    legalActions[0];
+  return { kind: pick.kind, targetContribution: pick.targetContribution ?? null };
+}
+
 export default async function handler(req: VercelReq, res: VercelRes) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'method_not_allowed' });
@@ -111,7 +120,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
   try {
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 64,
       system,
       messages: [{ role: 'user', content: context }],
@@ -122,9 +131,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
     const validKinds = new Set(payload.legalActions.map((a) => a.kind));
     if (!validKinds.has(parsed.kind)) {
-      // Fallback: if Claude picked an illegal action, default to check or fold
-      const fallback = payload.legalActions.find((a) => a.kind === 'check') ?? payload.legalActions[0];
-      res.status(200).json({ kind: fallback.kind, targetContribution: fallback.targetContribution ?? null });
+      res.status(200).json(safeFallback(payload.legalActions));
       return;
     }
 
@@ -133,8 +140,6 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       targetContribution: parsed.targetContribution ?? undefined,
     });
   } catch {
-    // Any failure: fall back to check or fold
-    const fallback = payload.legalActions.find((a) => a.kind === 'check') ?? payload.legalActions[0];
-    res.status(200).json({ kind: fallback.kind, targetContribution: fallback.targetContribution ?? null });
+    res.status(200).json(safeFallback(payload.legalActions));
   }
 }
